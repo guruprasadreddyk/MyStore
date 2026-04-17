@@ -1,10 +1,4 @@
 # E-commerce Platform: Complete Architecture & Infrastructure Guide
-
-**Project:** Serverless E-commerce Platform  
-**Date Updated:** April 15, 2026  
-**Region:** ap-southeast-1 (Singapore)  
-**AWS Profile:** idp-sbx-trn-lab-01
-
 ---
 
 ## Table of Contents
