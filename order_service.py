@@ -158,6 +158,10 @@ def lambda_handler(event, context):
         path = event.get("rawPath") or event.get("path", "")
         method = event.get("requestContext", {}).get("http", {}).get("method", "")
 
+        # Strip /v1 prefix for backward compatibility
+        if path.startswith("/v1/"):
+            path = path[3:]  # Remove "/v1" prefix
+
         print(f"INFO: Path={path}, Method={method}")
 
         # 🔹 GET /order → list all orders (for order history)
