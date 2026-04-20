@@ -2,8 +2,8 @@
 
 ## Table of Contents
 
-1. [Architecture Overview](#architecture-overview)
-2. [Project Structure](#project-structure)
+1. [Project Structure](#project-structure)
+2. [Architecture Overview](#architecture-overview)
 3. [Component Breakdown](#component-breakdown)
 4. [Data Flow Examples](#data-flow-examples)
 5. [AWS Console Navigation](#aws-console-navigation)
