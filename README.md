@@ -1,7 +1,5 @@
 # E-commerce Platform: Complete Architecture & Infrastructure Guide
 
----
-
 ## Table of Contents
 
 1. [Architecture Overview](#architecture-overview)
