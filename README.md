@@ -79,7 +79,7 @@ MyStore/
 - **Configuration Files**: `package.json`, `variables.tf`, `openapi-spec.json`
 - **Deployment Packages**: `.zip` files in `infrastructure/` (6 Lambda functions)
 - **Source Code**: `.py` files in `services/` and `tests/`
-- **Documentation**: `README.md`, `TESTING_README.md`, `ARCHITECTURE_AND_INFRASTRUCTURE.md`
+- **Documentation**: `README.md`
 - **Build Artifacts**: `frontend/build/` directory with compiled React app
 
 ---
