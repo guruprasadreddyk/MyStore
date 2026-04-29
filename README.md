@@ -57,6 +57,7 @@ MyStore/
 │   ├── payment_service.py         # Payment processing simulation
 │   ├── product_service.py         # Product catalog with cursor pagination
 │   ├── search_service.py          # Product search functionality
+│   ├── wishlist_service.py        # Cloud-synced wishlist management
 │   └── utils.py                   # Shared helpers: response(), convert_decimal(), get_user_id()
 ├── tests/                         # Unit tests
 │   ├── test_cart_service.py
@@ -112,26 +113,26 @@ MyStore/
                          │ Routes requests to backend
 ┌────────────────────────▼─────────────────────────────────────┐
 │                    API GATEWAY LAYER                          │
-│          HTTP/2 API Gateway (12 Routes)                       │
+│          HTTP/2 API Gateway (16 Routes)                       │
 │          (JWT Authorizer for Secure Routes)                   │
 │  Throttle: 50 RPS steady + 100 RPS burst                     │
 └─────────────┬──────────────────────────────────────────────┬──┘
               │ Routes to Lambda functions                    │
-    ┌─────────┼──────────────────────────┬───────────────────┘
-    │         │                          │
-┌───▼──┐ ┌───▼──┐ ┌──────┐ ┌──────────┐ ┌──────────┐
-│Prod  │ │Cart  │ │Order │ │Payment   │ │Search    │
-│Svc   │ │Svc   │ │Svc   │ │Svc       │ │Svc       │
-│(λ)   │ │(λ)   │ │(λ)   │ │(λ)       │ │(λ)       │
-└──┬───┘ └──┬───┘ └───┬──┘ └────┬─────┘ └──────────┘
-   │        │         │        │
-   └────────┼─────────┼────────┘
-            │         │
-┌───────────▼─────────▼──────────────────────┐
-│           DATA LAYER (DynamoDB)            │
-│  Products Table | Cart Table | Orders Tbl  │
-│  (Pay-per-request billing)                 │
-└────────────────────────────────────────────┘
+    ┌─────────┼──────────────────────────┬───────────────────┴───────┐
+    │         │                          │                           │
+┌───▼──┐ ┌───▼──┐ ┌──────┐ ┌──────────┐ ┌──────────┐ ┌───────────┐
+│Prod  │ │Cart  │ │Order │ │Payment   │ │Search    │ │Wishlist   │
+│Svc   │ │Svc   │ │Svc   │ │Svc       │ │Svc       │ │Svc (λ)    │
+│(λ)   │ │(λ)   │ │(λ)   │ │(λ)       │ │(λ)       │ └───────────┘
+└──┬───┘ └──┬───┘ └───┬──┘ └────┬─────┘ └──────────┘      │
+   │        │         │        │                          │
+   └────────┼─────────┼────────┘                          │
+            │         │                                   │
+┌───────────▼─────────▼───────────────────────────────────▼──┐
+│                    DATA LAYER (DynamoDB)                   │
+│  Products Table | Cart Table | Orders Tbl | Wishlist Tbl   │
+│  (Pay-per-request billing)                                 │
+└────────────────────────────────────────────────────────────┘
 
             ┌──────────────────────────────┐
             │   MESSAGING LAYER            │
@@ -179,7 +180,13 @@ MyStore/
 ### ✅ **Premium UI/UX Redesign**
 - **Aesthetic**: Replaced legacy styling with a modern "Dark SaaS" aesthetic.
 - **Glassmorphism**: Added frosted glass effects (`backdrop-filter: blur(20px)`) to navigation and product cards.
-- **Micro-animations**: Integrated smooth hover effects, scaling, and vibrant gradients.
+- **Fixed Layout**: Implemented an admin-style persistent left sidebar for filters and a true top-fixed global header.
+- **Quick View Modal**: Re-engineered modal architecture to render at the top app-level, fixing animation z-index conflicts.
+
+### ✅ **Cloud-Synced Wishlist Engine**
+- **Infrastructure**: Provisioned a new `wishlist_table_guru` DynamoDB table and `wishlist_service` Lambda function via Terraform.
+- **API Integration**: Exposed authenticated wishlist routes through the HTTP API Gateway.
+- **State Management**: Refactored the frontend React hooks to completely migrate away from local storage, enforcing persistent, cross-device wishlist state synced with the user's Auth0 identity.
 
 ### ✅ **Backend Refactoring & Code Quality**
 - **DRY Principle**: Extracted duplicated Lambda helper functions (`convert_decimal`, `response`) into a shared `utils.py` module.
@@ -192,32 +199,7 @@ MyStore/
 
 ---
 
-## Previous Updates (Early April 2026)
 
-### ✅ **Enhanced Testing Suite**
-- **35 Unit Tests**: Complete coverage for all 5 services
-- **Mocking Framework**: Moto for AWS service simulation
-- **Test Categories**:
-  - Product Service: 5 tests (CRUD, seeding, error handling)
-  - Cart Service: 8 tests (add/remove/clear, stock validation)
-  - Order Service: 7 tests (creation, validation, status updates)
-  - Payment Service: 7 tests (processing, validation, error scenarios)
-  - Search Service: 8 tests (search functionality, edge cases)
-
-### ✅ **API Versioning Implementation**
-- **Versioned Endpoints**: All 12 API endpoints now support `/v1/` prefixed paths
-- **Backward Compatibility**: Lambda handlers strip `/v1` prefix for seamless routing
-- **API Gateway Stage**: v1 stage deployed with access logging
-- **Path Support**: Both `/products` and `/v1/products` work identically
-
-### ✅ **Lambda Handler Updates**
-- **Version-Aware Routing**: All 5 services updated to handle versioned paths
-- **Path Stripping Logic**: Automatic `/v1` prefix removal before route matching
-- **Consistent Behavior**: Same functionality for versioned and non-versioned endpoints
-- **Authentication**: Bearer token security scheme
-
-
----
 
 ## Component Breakdown
 
@@ -360,12 +342,13 @@ CloudFront (Global Edge Locations)
 - **Documentation:** OpenAPI 3.0 spec available at `openapi-spec.json`
 - **Authentication:** Auth0 JWT Authorizer. Client sends `Authorization: Bearer <token>`. Required for Cart, Order, and Payment routes.
 
-**12 Routes:**
+**16 Routes:**
 
 | Route | Method | Handler | Purpose |
 |-------|--------|---------|---------|
 | `/v1/products` | GET | product_service | List all products |
 | `/v1/products/{id}` | GET | product_service | Get product details |
+| `/v1/recommendations` | GET | product_service | Get product recommendations |
 | `/v1/search` | GET | search_service | Search products by query |
 | `/v1/cart` | GET | cart_service | Get current cart |
 | `/v1/cart/add` | POST | cart_service | Add item to cart |
@@ -376,6 +359,9 @@ CloudFront (Global Edge Locations)
 | `/v1/order/{id}` | GET | order_service | Get order details |
 | `/v1/order/{id}` | PUT | order_service | Update order status |
 | `/v1/payment` | POST | payment_service | Process payment |
+| `/v1/wishlist` | GET | wishlist_service | Get user's wishlist |
+| `/v1/wishlist/add` | POST | wishlist_service | Add item to wishlist |
+| `/v1/wishlist/remove/{id}` | DELETE | wishlist_service | Remove item from wishlist |
 
 **AWS Console Navigation:**
 
@@ -689,9 +675,30 @@ Message automatically deleted from queue on success
    - **Triggers:** See "SQS" trigger for order_processor
    - Click SQS trigger to see:
      - Queue name
-     - Batch size
+      - Batch size
      - State (enabled/disabled)
      - Last processing result
+
+#### **4.7 Wishlist Service Lambda**
+
+**File:** `wishlist_service.py`
+
+**Handler:** `wishlist_service.lambda_handler`
+
+**Triggers:**
+- GET /wishlist
+- POST /wishlist/add
+- DELETE /wishlist/remove/{id}
+
+**Functions:**
+1. **GET /wishlist** → Returns user's saved wishlist items.
+2. **POST /wishlist/add** → Adds a product ID to the user's wishlist.
+3. **DELETE /wishlist/remove/{id}** → Removes a product ID from the wishlist.
+
+**Authentication:** Requires JWT Bearer token. User identity is extracted from the Auth0 `sub` claim — each user's wishlist is isolated securely.
+
+**Database Operations:**
+- Read/write `wishlist_table_guru` (keyed by Auth0 `user_id`)
 
 ---
 
@@ -770,6 +777,25 @@ Message automatically deleted from queue on success
 - Get all orders (scan)
 - Get order by ID (get item)
 - Update order status
+
+#### **Table 4: wishlist_table_guru**
+
+**Hash Key:** user_id (String)
+
+**User:** Auth0 `sub` claim (multi-tenant)
+
+**Schema:**
+```json
+{
+  "user_id": "auth0|64a8f...",
+  "items": ["prod_01", "prod_12"]
+}
+```
+
+**Access Patterns:**
+- Get wishlist (read)
+- Add item (append string to set/list)
+- Remove item (remove string from set/list)
 
 **AWS Console Navigation:**
 
@@ -1589,106 +1615,7 @@ curl -X GET "https://[api-id].execute-api.[region].amazonaws.com/v1/search?q=lap
 
 ---
 
-## Observability Implementation Guide
 
-### When You Have AWS Monitoring Permissions
-
-If you have appropriate AWS permissions, you can implement comprehensive observability using this Terraform configuration:
-
-#### **monitoring.tf** (Add this file when ready)
-
-```hcl
-# CloudWatch Alarms
-resource "aws_cloudwatch_alarm" "lambda_errors" {
-  alarm_name          = "MyStore-Lambda-Errors"
-  comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = "2"
-  metric_name         = "Errors"
-  namespace           = "AWS/Lambda"
-  period              = "300"
-  statistic           = "Sum"
-  threshold           = "1"
-  
-  alarm_actions = [aws_sns_topic.alerts.arn]
-}
-
-# CloudWatch Logs
-resource "aws_cloudwatch_log_group" "api_logs" {
-  name              = "/aws/lambda/mystore-api"
-  retention_in_days = 30
-}
-
-# CloudWatch Dashboard
-resource "aws_cloudwatch_dashboard" "mystore_dashboard" {
-  dashboard_name = "MyStore-Dashboard"
-  
-  dashboard_body = jsonencode({
-    widgets = [
-      {
-        type   = "metric"
-        properties = {
-          metrics = [["AWS/ApiGateway", "Count", "ApiName", "mystore-api"]]
-          title   = "API Gateway Requests"
-        }
-      }
-    ]
-  })
-}
-
-# SNS Topic for Alerts
-resource "aws_sns_topic" "alerts" {
-  name = "mystore-alerts"
-}
-
-# Optional: X-Ray Tracing
-resource "aws_xray_sampling_rule" "mystore_sampling" {
-  rule_name      = "MyStore-Sampling"
-  priority       = 10
-  reservoir_size = 1
-  fixed_rate     = 0.05
-  url_path       = "*"
-  http_method    = "*"
-  service_type   = "*"
-  service_name   = "*"
-  host           = "*"
-}
-```
-
-#### **Required AWS Permissions for Observability**
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "cloudwatch:*",
-        "logs:*",
-        "sns:*",
-        "xray:*"
-      ],
-      "Resource": "*"
-    }
-  ]
-}
-```
-
-#### **Key Metrics to Monitor**
-
-- **Lambda**: Invocations, Errors, Duration, Throttles
-- **API Gateway**: Request Count, 4xx/5xx Errors, Latency
-- **DynamoDB**: Consumed Capacity, User/System Errors
-- **SQS**: Messages Sent/Received, Queue Depth, Age of Oldest Message
-
-#### **Setting Up Alerts**
-
-1. **Lambda Errors**: Alert when any Lambda function fails
-2. **API 5xx Errors**: Alert on server-side errors
-3. **Queue Depth**: Alert when messages pile up in SQS
-4. **High Latency**: Alert when API response time exceeds threshold
-
----
 
 ## Architecture Decision Log
 
@@ -1733,6 +1660,6 @@ resource "aws_xray_sampling_rule" "mystore_sampling" {
 
 ---
 
-**Last Updated:** April 27, 2026  
+**Last Updated:** April 29, 2026  
 **Version:** 2.0  
 **Status:** Production Ready — Auth0 Secured, Paginated, Dark UI, Async Fulfillment
