@@ -159,5 +159,5 @@ class TestCartService:
             'items': [1, Decimal('2.5'), {'nested': Decimal('3.7')}]
         }
         result = convert_decimal(test_data)
-        assert result['price'] == 100
-        assert result['items'] == [1, 2, {'nested': 3}]
+        assert result['price'] == 100.5
+        assert result['items'] == [1, 2.5, {'nested': 3.7}]

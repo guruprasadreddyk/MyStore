@@ -34,8 +34,13 @@ def run_tests():
     for test_file in test_files:
         if os.path.exists(test_file):
             print(f"\nRunning {test_file}...")
+            env = os.environ.copy()
+            env["PYTHONPATH"] = os.pathsep.join([
+                os.path.abspath("services"),
+                env.get("PYTHONPATH", "")
+            ])
             result = subprocess.run([sys.executable, "-m", "pytest", test_file, "-v", "--tb=short"],
-                                  capture_output=True, text=True)
+                                  capture_output=True, text=True, env=env)
 
             print(result.stdout)
             if result.stderr:

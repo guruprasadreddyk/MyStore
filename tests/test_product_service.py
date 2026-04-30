@@ -27,6 +27,15 @@ class TestProductService:
             BillingMode='PAY_PER_REQUEST'
         )
 
+        # Seed a product for tests that look up by ID
+        self.product_table.put_item(Item={
+            'id': '1',
+            'name': 'Test Product',
+            'price': 100,
+            'category': 'Test',
+            'stock_quantity': 10
+        })
+
     def test_health_check(self):
         event = {
             'rawPath': '/health',
@@ -45,17 +54,9 @@ class TestProductService:
         response = lambda_handler(event, {})
         assert response['statusCode'] == 200
         data = json.loads(response['body'])
-        assert isinstance(data['data'], list)
-        # Should have the default products seeded
+        assert isinstance(data['data']['items'], list)
 
     def test_get_product_by_id(self):
-        # First seed the products by calling get_all_products
-        seed_event = {
-            'rawPath': '/products',
-            'requestContext': {'http': {'method': 'GET'}}
-        }
-        lambda_handler(seed_event, {})
-
         event = {
             'rawPath': '/products/1',
             'requestContext': {'http': {'method': 'GET'}}
