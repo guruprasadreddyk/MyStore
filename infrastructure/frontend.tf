@@ -101,7 +101,7 @@ resource "aws_cloudfront_distribution" "frontend" {
   }
 
   ordered_cache_behavior {
-    path_pattern     = "/products*"
+    path_pattern     = "/v1/products*"
     target_origin_id = "api-backend"
 
     allowed_methods = ["HEAD", "GET", "OPTIONS", "DELETE", "POST", "PUT", "PATCH"]
@@ -113,7 +113,7 @@ resource "aws_cloudfront_distribution" "frontend" {
   }
 
   ordered_cache_behavior {
-    path_pattern     = "/search*"
+    path_pattern     = "/v1/search*"
     target_origin_id = "api-backend"
 
     allowed_methods = ["HEAD", "GET", "OPTIONS", "DELETE", "POST", "PUT", "PATCH"]
@@ -128,7 +128,7 @@ resource "aws_cloudfront_distribution" "frontend" {
   }
 
   ordered_cache_behavior {
-    path_pattern     = "/cart*"
+    path_pattern     = "/v1/cart*"
     target_origin_id = "api-backend"
 
     allowed_methods = ["HEAD", "GET", "OPTIONS", "DELETE", "POST", "PUT", "PATCH"]
@@ -140,7 +140,7 @@ resource "aws_cloudfront_distribution" "frontend" {
   }
 
   ordered_cache_behavior {
-    path_pattern     = "/order*"
+    path_pattern     = "/v1/order*"
     target_origin_id = "api-backend"
 
     allowed_methods = ["HEAD", "GET", "OPTIONS", "DELETE", "POST", "PUT", "PATCH"]
@@ -152,7 +152,7 @@ resource "aws_cloudfront_distribution" "frontend" {
   }
 
   ordered_cache_behavior {
-    path_pattern     = "/payment*"
+    path_pattern     = "/v1/payment*"
     target_origin_id = "api-backend"
 
     allowed_methods = ["HEAD", "GET", "OPTIONS", "DELETE", "POST", "PUT", "PATCH"]
@@ -161,6 +161,37 @@ resource "aws_cloudfront_distribution" "frontend" {
     viewer_protocol_policy = "redirect-to-https"
 
     cache_policy_id = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
+  }
+
+  ordered_cache_behavior {
+    path_pattern     = "/v1/wishlist*"
+    target_origin_id = "api-backend"
+
+    allowed_methods = ["HEAD", "GET", "OPTIONS", "DELETE", "POST", "PUT", "PATCH"]
+    cached_methods  = ["GET", "HEAD"]
+
+    viewer_protocol_policy = "redirect-to-https"
+
+    cache_policy_id = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
+  }
+
+  ordered_cache_behavior {
+    path_pattern     = "/v1/recommendations*"
+    target_origin_id = "api-backend"
+
+    allowed_methods = ["HEAD", "GET", "OPTIONS"]
+    cached_methods  = ["GET", "HEAD"]
+
+    viewer_protocol_policy = "redirect-to-https"
+
+    cache_policy_id = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
+  }
+
+  # SPA fallback: S3 returns 403 for missing keys (private bucket), serve index.html
+  custom_error_response {
+    error_code         = 403
+    response_code      = 200
+    response_page_path = "/index.html"
   }
 
   custom_error_response {

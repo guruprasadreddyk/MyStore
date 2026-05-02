@@ -1,11 +1,15 @@
 import json
 import boto3
+import time
 from decimal import Decimal
 from utils import convert_decimal, response, get_user_id
 
 dynamodb = boto3.resource('dynamodb')
 table = dynamodb.Table('cart_table_guru')
 product_table = dynamodb.Table('products_table_guru')
+
+# Cart TTL: 7 days of inactivity before auto-expiry (mimics Redis TTL behaviour)
+CART_TTL_SECONDS = 7 * 24 * 60 * 60
 
 
 def fetch_product(product_id):
@@ -18,19 +22,18 @@ def fetch_product(product_id):
         return None
 
 
-
-
 # 🔹 Helper: Get cart
 def get_cart(user_id):
     res = table.get_item(Key={"user_id": user_id})
     return res.get("Item", {}).get("cart", [])
 
 
-# 🔹 Helper: Save cart
+# 🔹 Helper: Save cart with refreshed TTL on every write
 def save_cart(user_id, cart):
     table.put_item(Item={
         "user_id": user_id,
-        "cart": cart
+        "cart": cart,
+        "ttl": int(time.time()) + CART_TTL_SECONDS  # auto-expire after 7 days of inactivity
     })
 
 

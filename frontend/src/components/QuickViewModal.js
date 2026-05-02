@@ -14,8 +14,15 @@ function QuickViewModal({ product, onClose, addToCart, loading }) {
           </div>
           <div className="modal-details">
             <h2 className="modal-title">{product.name}</h2>
-            <p className="modal-price">${product.price.toLocaleString()}</p>
-            <div className="modal-rating">⭐ {product.rating}/5</div>
+            <p className="modal-price">₹{product.price.toLocaleString('en-IN')}</p>
+            <div className="modal-rating">
+              ⭐ {product.rating}/5
+              {product.review_count && (
+                <span style={{ fontSize: '0.8rem', opacity: 0.6, marginLeft: '8px' }}>
+                  ({product.review_count.toLocaleString('en-IN')} reviews)
+                </span>
+              )}
+            </div>
             <p className="modal-description">{product.description}</p>
             
             <div className="modal-stock">

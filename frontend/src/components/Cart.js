@@ -19,7 +19,7 @@ function Cart({ cart, loading, removeFromCart, placeOrder, cartTotal, isOpen, on
                 <div key={item.id} className="cart-item" style={{ padding: '16px', marginBottom: '16px', background: 'rgba(255,255,255,0.02)' }}>
                   <h3 style={{ fontSize: '1.2rem' }}>{item.name}</h3>
                   <div style={{ display: 'flex', justifyContent: 'space-between', margin: '12px 0' }}>
-                    <span>${item.price.toLocaleString()}</span>
+                    <span>₹{item.price.toLocaleString('en-IN')}</span>
                     <span>Qty: {item.quantity}</span>
                   </div>
                   <button
@@ -39,7 +39,7 @@ function Cart({ cart, loading, removeFromCart, placeOrder, cartTotal, isOpen, on
           <div className="cart-footer">
             <h3 style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '24px' }}>
               <span>Total:</span>
-              <span>${cartTotal.toLocaleString()}</span>
+              <span>₹{cartTotal.toLocaleString('en-IN')}</span>
             </h3>
             <button
               onClick={() => {

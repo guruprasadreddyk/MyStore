@@ -26,7 +26,7 @@ class TestPaymentService:
             BillingMode='PAY_PER_REQUEST'
         )
 
-        # Seed test order
+        # Standard order: 2 items * 100 = 200 total (well within limits)
         self.test_order_id = 'test-order-123'
         self.orders_table.put_item(Item={
             'order_id': self.test_order_id,
@@ -36,63 +36,96 @@ class TestPaymentService:
             'status': 'created'
         })
 
+        # High-value order: triggers INSUFFICIENT_FUNDS rule (amount > 500,000)
+        self.high_value_order_id = 'test-order-highvalue'
+        self.orders_table.put_item(Item={
+            'order_id': self.high_value_order_id,
+            'items': [
+                {'id': '2', 'name': 'Expensive Item', 'price': 600000, 'quantity': 1}
+            ],
+            'status': 'created'
+        })
+
+        # Large cart order: triggers CARD_VELOCITY_EXCEEDED rule (> 10 items)
+        self.large_cart_order_id = 'test-order-largecart'
+        self.orders_table.put_item(Item={
+            'order_id': self.large_cart_order_id,
+            'items': [{'id': str(i), 'name': f'Item {i}', 'price': 10, 'quantity': 1} for i in range(11)],
+            'status': 'created'
+        })
+
     def test_payment_success(self):
+        """Standard order within all limits should succeed."""
         event = {
             'rawPath': '/payment',
             'requestContext': {'http': {'method': 'POST'}},
             'body': json.dumps({
                 'order_id': self.test_order_id,
-                'amount': 200  # 2 items * 100 each
+                'amount': 200  # 2 * 100
             })
         }
+        response = lambda_handler(event, {})
+        assert response['statusCode'] == 200
+        data = json.loads(response['body'])
+        assert data['status'] == 'success'
+        assert data['data']['status'] == 'success'
+        assert 'payment_id' in data['data']
+        assert data['data']['decline_code'] is None
 
-        # Mock random to always return success
-        import services.payment_service as payment_service
-        original_random = payment_service.random.choice
-        payment_service.random.choice = lambda x: True
+    def test_payment_already_paid(self):
+        """Paying an already-paid order should be rejected."""
+        self.orders_table.put_item(Item={
+            'order_id': 'paid-order',
+            'items': [{'id': '1', 'name': 'Item', 'price': 100, 'quantity': 1}],
+            'status': 'paid'
+        })
+        event = {
+            'rawPath': '/payment',
+            'requestContext': {'http': {'method': 'POST'}},
+            'body': json.dumps({'order_id': 'paid-order', 'amount': 100})
+        }
+        response = lambda_handler(event, {})
+        assert response['statusCode'] == 400
+        data = json.loads(response['body'])
+        assert 'already been paid' in data['message']
 
-        try:
-            response = lambda_handler(event, {})
-            assert response['statusCode'] == 200
-            data = json.loads(response['body'])
-            assert data['status'] == 'success'
-            assert data['data']['status'] == 'success'
-            assert 'payment_id' in data['data']
-        finally:
-            payment_service.random.choice = original_random
-
-    def test_payment_failure(self):
+    def test_payment_declined_insufficient_funds(self):
+        """High-value order should be declined with INSUFFICIENT_FUNDS code."""
         event = {
             'rawPath': '/payment',
             'requestContext': {'http': {'method': 'POST'}},
             'body': json.dumps({
-                'order_id': self.test_order_id,
-                'amount': 200
+                'order_id': self.high_value_order_id,
+                'amount': 600000
             })
         }
+        response = lambda_handler(event, {})
+        assert response['statusCode'] == 400
+        data = json.loads(response['body'])
+        assert data['data']['decline_code'] == 'INSUFFICIENT_FUNDS'
+        assert data['data']['status'] == 'declined'
 
-        # Mock random to always return failure
-        import services.payment_service as payment_service
-        original_random = payment_service.random.choice
-        payment_service.random.choice = lambda x: False
-
-        try:
-            response = lambda_handler(event, {})
-            assert response['statusCode'] == 400
-            data = json.loads(response['body'])
-            assert data['status'] == 'error'
-            assert data['data']['status'] == 'failed'
-        finally:
-            payment_service.random.choice = original_random
+    def test_payment_declined_velocity(self):
+        """Order with > 10 items should be declined with CARD_VELOCITY_EXCEEDED."""
+        total = 11 * 10  # 11 items * price 10
+        event = {
+            'rawPath': '/payment',
+            'requestContext': {'http': {'method': 'POST'}},
+            'body': json.dumps({
+                'order_id': self.large_cart_order_id,
+                'amount': total
+            })
+        }
+        response = lambda_handler(event, {})
+        assert response['statusCode'] == 400
+        data = json.loads(response['body'])
+        assert data['data']['decline_code'] == 'CARD_VELOCITY_EXCEEDED'
 
     def test_payment_invalid_order(self):
         event = {
             'rawPath': '/payment',
             'requestContext': {'http': {'method': 'POST'}},
-            'body': json.dumps({
-                'order_id': 'invalid-order',
-                'amount': 200
-            })
+            'body': json.dumps({'order_id': 'invalid-order', 'amount': 200})
         }
         response = lambda_handler(event, {})
         assert response['statusCode'] == 400
@@ -103,10 +136,7 @@ class TestPaymentService:
         event = {
             'rawPath': '/payment',
             'requestContext': {'http': {'method': 'POST'}},
-            'body': json.dumps({
-                'order_id': self.test_order_id,
-                'amount': 300  # Wrong amount
-            })
+            'body': json.dumps({'order_id': self.test_order_id, 'amount': 300})
         }
         response = lambda_handler(event, {})
         assert response['statusCode'] == 400
@@ -117,9 +147,7 @@ class TestPaymentService:
         event = {
             'rawPath': '/payment',
             'requestContext': {'http': {'method': 'POST'}},
-            'body': json.dumps({
-                'amount': 200
-            })
+            'body': json.dumps({'amount': 200})
         }
         response = lambda_handler(event, {})
         assert response['statusCode'] == 400
@@ -130,15 +158,12 @@ class TestPaymentService:
         event = {
             'rawPath': '/payment',
             'requestContext': {'http': {'method': 'POST'}},
-            'body': json.dumps({
-                'order_id': self.test_order_id,
-                'amount': 0
-            })
+            'body': json.dumps({'order_id': self.test_order_id, 'amount': 0})
         }
         response = lambda_handler(event, {})
         assert response['statusCode'] == 400
         data = json.loads(response['body'])
-        assert 'Valid amount is required' in data['message']
+        assert 'greater than zero' in data['message']
 
     def test_invalid_route(self):
         event = {

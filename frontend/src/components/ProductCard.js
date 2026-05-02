@@ -20,13 +20,18 @@ function ProductCard({ product, addToCart, loading, toggleWishlist, isWishlisted
         <p className="product-category">{product.category}</p>
         <p className="product-description">{product.description}</p>
         <div className="product-details">
-          <span className="product-price">${product.price.toLocaleString()}</span>
+          <span className="product-price">₹{product.price.toLocaleString('en-IN')}</span>
           <span className={`product-stock ${product.stock_quantity > 0 ? 'in-stock' : 'out-of-stock'}`}>
             {product.stock_quantity > 0 ? `In Stock (${product.stock_quantity})` : 'Out of Stock'}
           </span>
         </div>
         <div className="product-rating">
           ⭐ {product.rating}/5
+          {product.review_count && (
+            <span style={{ fontSize: '0.75rem', opacity: 0.6, marginLeft: '6px' }}>
+              ({product.review_count.toLocaleString('en-IN')} reviews)
+            </span>
+          )}
         </div>
       </div>
       <div className="card-actions-bottom" style={{ display: 'flex', gap: '8px' }}>

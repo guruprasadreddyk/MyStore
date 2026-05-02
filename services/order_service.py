@@ -3,6 +3,7 @@ import os
 import uuid
 import boto3
 from decimal import Decimal
+from botocore.exceptions import ClientError
 from utils import convert_decimal, response, get_user_id
 
 
@@ -73,6 +74,52 @@ def save_order(order):
         orders_table.put_item(Item=order)
     except Exception as e:
         print(f"ERROR saving order: {str(e)}")
+
+
+def reserve_inventory(items):
+    """
+    Atomically decrement stock for each item using conditional writes.
+    Returns (success, failed_item_id) — rolls back already-decremented items on failure.
+    """
+    reserved = []
+    for item in items:
+        product_id = str(item["id"])
+        quantity = item.get("quantity", 1)
+        try:
+            product_table.update_item(
+                Key={"id": product_id},
+                UpdateExpression="SET stock_quantity = stock_quantity - :qty",
+                ConditionExpression="stock_quantity >= :qty",
+                ExpressionAttributeValues={":qty": quantity}
+            )
+            reserved.append(item)
+            print(f"INFO: Reserved {quantity} units of product {product_id}")
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                print(f"ERROR: Insufficient stock for product {product_id}")
+                # Roll back already-reserved items
+                _rollback_inventory(reserved)
+                return False, product_id
+            print(f"ERROR: Unexpected error reserving product {product_id}: {str(e)}")
+            _rollback_inventory(reserved)
+            return False, product_id
+    return True, None
+
+
+def _rollback_inventory(reserved_items):
+    """Restore stock for items that were already decremented before a failure."""
+    for item in reserved_items:
+        product_id = str(item["id"])
+        quantity = item.get("quantity", 1)
+        try:
+            product_table.update_item(
+                Key={"id": product_id},
+                UpdateExpression="SET stock_quantity = stock_quantity + :qty",
+                ExpressionAttributeValues={":qty": quantity}
+            )
+            print(f"INFO: Rolled back {quantity} units for product {product_id}")
+        except Exception as e:
+            print(f"ERROR: Failed to rollback inventory for {product_id}: {str(e)}")
 
 
 def send_order_to_queue(order):
@@ -202,6 +249,11 @@ def lambda_handler(event, context):
 
             # ✅ aggregate duplicates → quantity
             processed_items = aggregate_items(validated_items)
+
+            # ✅ Reserve inventory atomically before saving the order
+            success, failed_product_id = reserve_inventory(processed_items)
+            if not success:
+                return response(400, message=f"Insufficient stock for product {failed_product_id}")
 
             order = {
                 "order_id": str(uuid.uuid4()),

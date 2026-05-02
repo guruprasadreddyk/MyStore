@@ -7,6 +7,12 @@ resource "aws_dynamodb_table" "cart_table" {
     name = "user_id"
     type = "S"
   }
+
+  # TTL: DynamoDB auto-deletes abandoned carts after 7 days (mimics Redis TTL)
+  ttl {
+    attribute_name = "ttl"
+    enabled        = true
+  }
 }
 
 resource "aws_dynamodb_table" "products_table" {

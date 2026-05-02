@@ -17,12 +17,12 @@ function OrderHistory({ orders, loading, processPayment }) {
                   <div key={item.id} className="order-item">
                     <span>{item.name}</span>
                     <span>Qty: {item.quantity}</span>
-                    <span>${item.price * item.quantity}</span>
+                    <span>₹{(item.price * item.quantity).toLocaleString('en-IN')}</span>
                   </div>
                 ))}
               </div>
               <p className="order-total">
-                Total: ${order.items.reduce((sum, item) => sum + (item.price * item.quantity), 0)}
+                Total: ₹{order.items.reduce((sum, item) => sum + (item.price * item.quantity), 0).toLocaleString('en-IN')}
               </p>
               {order.status === 'created' && (
                 <button

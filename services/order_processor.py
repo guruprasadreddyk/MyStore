@@ -57,17 +57,16 @@ def lambda_handler(event, context):
                 order = orders_table.get_item(Key={"order_id": order_id}).get("Item")
                 if order:
                     print(f"INFO: Processing order {order_id}")
-                    
-                    # 2. Update Inventory
-                    items = order.get("items", [])
-                    update_inventory(items)
 
-                    # 3. Update order status to 'shipped'
+                    # Inventory was already reserved atomically at order creation time.
+                    # The processor's job is fulfillment: update status and notify.
+
+                    # 2. Update order status to 'shipped'
                     order['status'] = 'shipped'
                     orders_table.put_item(Item=order)
                     print(f"INFO: Order {order_id} status updated to shipped")
                     
-                    # 4. Send email/SNS notification
+                    # 3. Send shipping notification via SNS
                     publish_shipping_notification(order)
                     
                 else:

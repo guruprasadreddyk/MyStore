@@ -40,7 +40,9 @@ export default function useProducts() {
       try {
         const data = await fetchSearchResultsApi(query);
         if (data.status === 'success') {
-          setSearchResults(data.data);
+          // API returns { items: [...], lastEvaluatedKey, total }
+          const items = data.data?.items ?? data.data;
+          setSearchResults(Array.isArray(items) ? items : localFallback);
         } else {
           console.error('Search error:', data.message);
           setSearchResults(localFallback);

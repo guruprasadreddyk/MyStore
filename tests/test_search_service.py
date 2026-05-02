@@ -68,8 +68,8 @@ class TestSearchService:
         assert response['statusCode'] == 200
         data = json.loads(response['body'])
         assert data['status'] == 'success'
-        assert len(data['data']) == 1
-        assert 'Wireless Bluetooth Headphones' in data['data'][0]['name']
+        assert len(data['data']['items']) == 1
+        assert 'Wireless Bluetooth Headphones' in data['data']['items'][0]['name']
 
     def test_search_by_description(self):
         event = {
@@ -80,8 +80,8 @@ class TestSearchService:
         response = lambda_handler(event, {})
         assert response['statusCode'] == 200
         data = json.loads(response['body'])
-        assert len(data['data']) == 1
-        assert 'Smart Fitness Watch' in data['data'][0]['name']
+        assert len(data['data']['items']) == 1
+        assert 'Smart Fitness Watch' in data['data']['items'][0]['name']
 
     def test_search_case_insensitive(self):
         event = {
@@ -92,7 +92,7 @@ class TestSearchService:
         response = lambda_handler(event, {})
         assert response['statusCode'] == 200
         data = json.loads(response['body'])
-        assert len(data['data']) == 1
+        assert len(data['data']['items']) == 1
 
     def test_search_multiple_results(self):
         event = {
@@ -103,7 +103,7 @@ class TestSearchService:
         response = lambda_handler(event, {})
         assert response['statusCode'] == 200
         data = json.loads(response['body'])
-        assert len(data['data']) == 1  # Only the headphones have "wireless" in description
+        assert len(data['data']['items']) == 1  # Only headphones have "wireless"
 
     def test_search_no_results(self):
         event = {
@@ -114,7 +114,49 @@ class TestSearchService:
         response = lambda_handler(event, {})
         assert response['statusCode'] == 200
         data = json.loads(response['body'])
-        assert len(data['data']) == 0
+        assert len(data['data']['items']) == 0
+        assert data['data']['total'] == 0
+
+    def test_search_with_price_filter(self):
+        """Server-side price filter: only products within range returned."""
+        event = {
+            'rawPath': '/search',
+            'requestContext': {'http': {'method': 'GET'}},
+            'queryStringParameters': {'q': 'watch', 'minPrice': '20000', 'maxPrice': '30000'}
+        }
+        response = lambda_handler(event, {})
+        assert response['statusCode'] == 200
+        data = json.loads(response['body'])
+        items = data['data']['items']
+        assert len(items) == 1
+        assert items[0]['name'] == 'Smart Fitness Watch'
+
+    def test_search_with_category_filter(self):
+        """Server-side category filter: only Clothing items returned."""
+        event = {
+            'rawPath': '/search',
+            'requestContext': {'http': {'method': 'GET'}},
+            'queryStringParameters': {'q': 'cotton', 'category': 'Clothing'}
+        }
+        response = lambda_handler(event, {})
+        assert response['statusCode'] == 200
+        data = json.loads(response['body'])
+        items = data['data']['items']
+        assert len(items) == 1
+        assert items[0]['category'] == 'Clothing'
+
+    def test_search_response_has_pagination_fields(self):
+        """Response should always include pagination metadata."""
+        event = {
+            'rawPath': '/search',
+            'requestContext': {'http': {'method': 'GET'}},
+            'queryStringParameters': {'q': 'headphones'}
+        }
+        response = lambda_handler(event, {})
+        data = json.loads(response['body'])
+        assert 'items' in data['data']
+        assert 'lastEvaluatedKey' in data['data']
+        assert 'total' in data['data']
 
     def test_search_empty_query(self):
         event = {
