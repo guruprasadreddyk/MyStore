@@ -38,7 +38,7 @@ resource "aws_apigatewayv2_stage" "default" {
 resource "aws_apigatewayv2_integration" "integration" {
   for_each = {
     catalog = aws_lambda_function.function["catalog"].invoke_arn
-    cart    = aws_lambda_function.function["cart"].invoke_arn
+    user    = aws_lambda_function.function["user"].invoke_arn
     order   = aws_lambda_function.function["order"].invoke_arn
     payment = aws_lambda_function.function["payment"].invoke_arn
     admin   = aws_lambda_function.function["admin"].invoke_arn
@@ -61,24 +61,24 @@ locals {
     { name = "health",          route_key = "GET /health",                     integration = "catalog",  protected = false },
 
     # Cart + Wishlist (authenticated)
-    { name = "cart_get",        route_key = "GET /cart",                       integration = "cart",     protected = true },
-    { name = "cart_add",        route_key = "POST /cart/add",                  integration = "cart",     protected = true },
-    { name = "cart_remove",     route_key = "DELETE /cart/remove/{id}",        integration = "cart",     protected = true },
-    { name = "cart_clear",      route_key = "DELETE /cart",                    integration = "cart",     protected = true },
-    { name = "wishlist_get",    route_key = "GET /wishlist",                   integration = "cart",     protected = true },
-    { name = "wishlist_add",    route_key = "POST /wishlist/add",              integration = "cart",     protected = true },
-    { name = "wishlist_remove", route_key = "DELETE /wishlist/remove/{id}",    integration = "cart",     protected = true },
+    { name = "cart_get",        route_key = "GET /cart",                       integration = "user",     protected = true },
+    { name = "cart_add",        route_key = "POST /cart/add",                  integration = "user",     protected = true },
+    { name = "cart_remove",     route_key = "DELETE /cart/remove/{id}",        integration = "user",     protected = true },
+    { name = "cart_clear",      route_key = "DELETE /cart",                    integration = "user",     protected = true },
+    { name = "wishlist_get",    route_key = "GET /wishlist",                   integration = "user",     protected = true },
+    { name = "wishlist_add",    route_key = "POST /wishlist/add",              integration = "user",     protected = true },
+    { name = "wishlist_remove", route_key = "DELETE /wishlist/remove/{id}",    integration = "user",     protected = true },
 
     # Saved Addresses
-    { name = "addresses_get",   route_key = "GET /addresses",                  integration = "cart",     protected = true },
-    { name = "addresses_post",  route_key = "POST /addresses",                 integration = "cart",     protected = true },
-    { name = "addresses_put",   route_key = "PUT /addresses/{id}",             integration = "cart",     protected = true },
-    { name = "addresses_del",   route_key = "DELETE /addresses/{id}",          integration = "cart",     protected = true },
+    { name = "addresses_get",   route_key = "GET /addresses",                  integration = "user",     protected = true },
+    { name = "addresses_post",  route_key = "POST /addresses",                 integration = "user",     protected = true },
+    { name = "addresses_put",   route_key = "PUT /addresses/{id}",             integration = "user",     protected = true },
+    { name = "addresses_del",   route_key = "DELETE /addresses/{id}",          integration = "user",     protected = true },
 
     # User profile (editable display name, phone, bio — stored in DynamoDB)
-    { name = "profile_get",     route_key = "GET /profile/me",                 integration = "cart",     protected = true },
-    { name = "profile_put",     route_key = "PUT /profile/me",                 integration = "cart",     protected = true },
-    { name = "profile_verify",  route_key = "POST /profile/verify-email",      integration = "cart",     protected = true },
+    { name = "profile_get",     route_key = "GET /profile/me",                 integration = "user",     protected = true },
+    { name = "profile_put",     route_key = "PUT /profile/me",                 integration = "user",     protected = true },
+    { name = "profile_verify",  route_key = "POST /profile/verify-email",      integration = "user",     protected = true },
 
     # Orders (authenticated)
     { name = "order_get_all",   route_key = "GET /order",                      integration = "order",    protected = true },
@@ -116,7 +116,7 @@ resource "aws_apigatewayv2_route" "route" {
 resource "aws_lambda_permission" "allow_api" {
   for_each = {
     catalog = aws_lambda_function.function["catalog"].function_name
-    cart    = aws_lambda_function.function["cart"].function_name
+    user    = aws_lambda_function.function["user"].function_name
     order   = aws_lambda_function.function["order"].function_name
     payment = aws_lambda_function.function["payment"].function_name
     admin   = aws_lambda_function.function["admin"].function_name

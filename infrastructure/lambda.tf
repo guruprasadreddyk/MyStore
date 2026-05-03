@@ -4,7 +4,7 @@ locals {
       handler  = "catalog_service.lambda_handler"
       filename = "${path.module}/../catalog_service_guru.zip"
     }
-    cart = {
+    user = {
       handler  = "user_service.lambda_handler"
       filename = "${path.module}/../user_service_guru.zip"
     }
@@ -45,8 +45,8 @@ resource "aws_lambda_function" "function" {
         SNS_TOPIC_NAME = var.sns_topic_name
         AWS_REGION_NAME = var.aws_region
       },
-      # Auth0 M2M credentials — only injected into user_service (cart key)
-      each.key == "cart" ? {
+      # Auth0 M2M credentials — only injected into user_service
+      each.key == "user" ? {
         AUTH0_DOMAIN            = var.auth0_domain
         AUTH0_M2M_CLIENT_ID     = var.auth0_m2m_client_id
         AUTH0_M2M_CLIENT_SECRET = var.auth0_m2m_client_secret
