@@ -44,7 +44,6 @@ docs/
 .venv/
 pytest_cache/
 .pytest_cache/
-.kiro/
 
 *.zip
 
