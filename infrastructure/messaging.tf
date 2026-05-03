@@ -53,7 +53,7 @@ resource "aws_sns_topic_subscription" "order_notifications_to_sqs" {
 resource "aws_sns_topic_subscription" "order_notifications_email" {
   topic_arn = aws_sns_topic.order_notifications.arn
   protocol  = "email"
-  endpoint  = "guruprasad.reddy@idp.com"  # Replace with actual email
+  endpoint  = var.notification_email
 }
 
 # SQS Queue Policy: Allow SNS to send messages

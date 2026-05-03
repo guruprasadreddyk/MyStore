@@ -26,13 +26,18 @@ class TestPaymentService:
             BillingMode='PAY_PER_REQUEST'
         )
 
-        # Standard order: 2 items * 100 = 200 total (well within limits)
+        # Standard order: 2 items * 100 = 200 subtotal
+        # GST 18% = 36, delivery free (>= 500? no, 200 < 500 so +49), grand_total = 200+49+36 = 285
         self.test_order_id = 'test-order-123'
         self.orders_table.put_item(Item={
             'order_id': self.test_order_id,
             'items': [
                 {'id': '1', 'name': 'Test Product', 'price': 100, 'quantity': 2}
             ],
+            'subtotal': 200,
+            'delivery_charge': 49,
+            'gst': 36,
+            'grand_total': 285,
             'status': 'created'
         })
 
@@ -51,6 +56,7 @@ class TestPaymentService:
         self.orders_table.put_item(Item={
             'order_id': self.large_cart_order_id,
             'items': [{'id': str(i), 'name': f'Item {i}', 'price': 10, 'quantity': 1} for i in range(11)],
+            'grand_total': 110,  # 11 * 10, no delivery (>= 500? no, but keeping simple for test)
             'status': 'created'
         })
 
@@ -61,7 +67,7 @@ class TestPaymentService:
             'requestContext': {'http': {'method': 'POST'}},
             'body': json.dumps({
                 'order_id': self.test_order_id,
-                'amount': 200  # 2 * 100
+                'amount': 285  # grand_total: 200 subtotal + 49 delivery + 36 GST
             })
         }
         response = lambda_handler(event, {})
@@ -107,13 +113,12 @@ class TestPaymentService:
 
     def test_payment_declined_velocity(self):
         """Order with > 10 items should be declined with CARD_VELOCITY_EXCEEDED."""
-        total = 11 * 10  # 11 items * price 10
         event = {
             'rawPath': '/payment',
             'requestContext': {'http': {'method': 'POST'}},
             'body': json.dumps({
                 'order_id': self.large_cart_order_id,
-                'amount': total
+                'amount': 110  # matches grand_total
             })
         }
         response = lambda_handler(event, {})
@@ -136,7 +141,7 @@ class TestPaymentService:
         event = {
             'rawPath': '/payment',
             'requestContext': {'http': {'method': 'POST'}},
-            'body': json.dumps({'order_id': self.test_order_id, 'amount': 300})
+            'body': json.dumps({'order_id': self.test_order_id, 'amount': 999})
         }
         response = lambda_handler(event, {})
         assert response['statusCode'] == 400

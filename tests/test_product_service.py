@@ -5,7 +5,7 @@ import pytest
 import boto3
 from moto import mock_aws
 import json
-from services.product_service import lambda_handler
+from services.catalog_service import lambda_handler
 
 @mock_aws
 class TestProductService:

@@ -4,10 +4,16 @@ import './App.css';
 import Navigation from './components/Navigation';
 import ProductList from './components/ProductList';
 import Cart from './components/Cart';
+import Checkout from './components/Checkout';
 import OrderHistory from './components/OrderHistory';
 import Wishlist from './components/Wishlist';
 import Toast from './components/Toast';
 import QuickViewModal from './components/QuickViewModal';
+import AdminPanel from './components/AdminPanel';
+import ProfilePage from './components/ProfilePage';
+import AddressesPage from './components/AddressesPage';
+import PaymentMethodsPage from './components/PaymentMethodsPage';
+import NotificationsPage from './components/NotificationsPage';
 import useProducts from './hooks/useProducts';
 import useCart from './hooks/useCart';
 import useOrders from './hooks/useOrders';
@@ -54,6 +60,7 @@ function App() {
     loading: ordersLoading,
     placeOrder,
     processPayment,
+    cancelOrder,
   } = useOrders();
 
   const { recommendations, showRecommendations } = useRecommendations(cart);
@@ -70,6 +77,7 @@ function App() {
 
   const [toasts, setToasts] = useState([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
+  const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [quickViewProduct, setQuickViewProduct] = useState(null);
 
   const addToast = (message, type = 'success') => {
@@ -92,19 +100,20 @@ function App() {
     return <div>Loading authentication...</div>;
   }
 
-  const handlePlaceOrder = async () => {
+  const handlePlaceOrder = async ({ address, grandTotal }) => {
     if (cart.length === 0) {
       addToast('Cart is empty', 'error');
       return;
     }
 
     const items = cart.map((item) => ({ id: item.id }));
-    const data = await placeOrder(items);
+    const data  = await placeOrder(items, address);
 
     if (data.status === 'success') {
       adjustProductStock(cart);
+      setIsCheckoutOpen(false);
       navigate('/orders');
-      addToast('Order placed successfully!', 'success');
+      addToast('Order placed! Proceed to payment.', 'success');
     } else {
       addToast(data.message || 'Order placement failed', 'error');
     }
@@ -114,13 +123,24 @@ function App() {
     const order = orders.find((o) => o.order_id === orderId);
     if (!order) return;
 
-    const total = order.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    // Use grand_total if available (includes GST + delivery), else fall back
+    const total = order.grand_total
+      ?? order.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
     const data = await processPayment(orderId, total);
 
     if (data.status === 'success') {
       addToast('Payment successful!', 'success');
     } else {
       addToast(data.message || 'Payment failed', 'error');
+    }
+  };
+
+  const handleCancelOrder = async (orderId) => {
+    const data = await cancelOrder(orderId);
+    if (data.status === 'success') {
+      addToast('Order cancelled successfully', 'success');
+    } else {
+      addToast(data.message || 'Failed to cancel order', 'error');
     }
   };
 
@@ -184,20 +204,38 @@ function App() {
               orders={orders}
               loading={loading}
               processPayment={handleProcessPayment}
+              cancelOrder={handleCancelOrder}
             />
           } />
+          <Route path="/admin" element={<AdminPanel />} />
+          <Route path="/profile" element={<ProfilePage />} />
+          <Route path="/addresses" element={<AddressesPage />} />
+          <Route path="/payment-methods" element={<PaymentMethodsPage />} />
+          <Route path="/notifications" element={<NotificationsPage orders={orders} />} />
         </Routes>
       </main>
 
       <Cart
         cart={cart}
         loading={loading}
+        addToCart={handleAddToCart}
         removeFromCart={removeFromCart}
-        placeOrder={handlePlaceOrder}
+        onCheckout={() => { setIsCartOpen(false); setIsCheckoutOpen(true); }}
         cartTotal={getCartTotal()}
         isOpen={isCartOpen}
         onClose={() => setIsCartOpen(false)}
       />
+
+      {isCheckoutOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 1000, overflowY: 'auto' }}>
+          <Checkout
+            cart={cart}
+            onConfirm={handlePlaceOrder}
+            onCancel={() => { setIsCheckoutOpen(false); setIsCartOpen(true); }}
+            loading={loading}
+          />
+        </div>
+      )}
 
       <QuickViewModal
         product={quickViewProduct}

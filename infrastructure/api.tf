@@ -18,32 +18,30 @@ resource "aws_apigatewayv2_authorizer" "auth0" {
   name             = "auth0-authorizer"
 
   jwt_configuration {
-    audience = ["https://api.mystore.com"]
-    issuer   = "https://dev-sjgq3v6pvbgxs6mb.us.auth0.com/"
+    audience = [var.auth0_audience]
+    issuer   = "https://${var.auth0_domain}/"
   }
 }
 
-# API Gateway throttling to handle higher request rates
 resource "aws_apigatewayv2_stage" "default" {
   api_id      = aws_apigatewayv2_api.api.id
   name        = "$default"
   auto_deploy = true
 
-  # Throttling configuration
   default_route_settings {
-    throttling_burst_limit = 100  # Burst requests per second
-    throttling_rate_limit  = 50   # Steady-state requests per second
+    throttling_burst_limit = 100
+    throttling_rate_limit  = 50
   }
 }
 
+# ── Lambda integrations (one per Lambda function) ─────────────────────────────
 resource "aws_apigatewayv2_integration" "integration" {
   for_each = {
-    product = aws_lambda_function.function["product"].invoke_arn
+    catalog = aws_lambda_function.function["catalog"].invoke_arn
     cart    = aws_lambda_function.function["cart"].invoke_arn
     order   = aws_lambda_function.function["order"].invoke_arn
     payment = aws_lambda_function.function["payment"].invoke_arn
-    search  = aws_lambda_function.function["search"].invoke_arn
-    wishlist = aws_lambda_function.function["wishlist"].invoke_arn
+    admin   = aws_lambda_function.function["admin"].invoke_arn
   }
 
   api_id                 = aws_apigatewayv2_api.api.id
@@ -52,24 +50,54 @@ resource "aws_apigatewayv2_integration" "integration" {
   payload_format_version = "2.0"
 }
 
+# ── Routes ────────────────────────────────────────────────────────────────────
 locals {
   routes = [
-    { name = "products",     route_key = "GET /products",             integration = "product", protected = false },
-    { name = "product_by_id",route_key = "GET /products/{id}",       integration = "product", protected = false },
-    { name = "search",       route_key = "GET /search",              integration = "search", protected = false },
-    { name = "recommendations",route_key = "GET /recommendations",    integration = "product", protected = false },
-    { name = "cart_get",     route_key = "GET /cart",                integration = "cart", protected = true },
-    { name = "cart_add",     route_key = "POST /cart/add",          integration = "cart", protected = true },
-    { name = "cart_remove",  route_key = "DELETE /cart/remove/{id}",integration = "cart", protected = true },
-    { name = "cart_clear",   route_key = "DELETE /cart",           integration = "cart", protected = true },
-    { name = "order_get_all",route_key = "GET /order",              integration = "order", protected = true },
-    { name = "order_post",   route_key = "POST /order",            integration = "order", protected = true },
-    { name = "order_get",    route_key = "GET /order/{id}",        integration = "order", protected = true },
-    { name = "order_put",    route_key = "PUT /order/{id}",        integration = "order", protected = true },
-    { name = "payment",      route_key = "POST /payment",          integration = "payment", protected = true },
-    { name = "wishlist_get", route_key = "GET /wishlist",          integration = "wishlist", protected = true },
-    { name = "wishlist_add", route_key = "POST /wishlist/add",     integration = "wishlist", protected = true },
-    { name = "wishlist_remove",route_key = "DELETE /wishlist/remove/{id}",integration = "wishlist", protected = true }
+    # Catalog (public)
+    { name = "products",        route_key = "GET /products",                    integration = "catalog",  protected = false },
+    { name = "product_by_id",   route_key = "GET /products/{id}",              integration = "catalog",  protected = false },
+    { name = "search",          route_key = "GET /search",                     integration = "catalog",  protected = false },
+    { name = "recommendations", route_key = "GET /recommendations",            integration = "catalog",  protected = false },
+    { name = "health",          route_key = "GET /health",                     integration = "catalog",  protected = false },
+
+    # Cart + Wishlist (authenticated)
+    { name = "cart_get",        route_key = "GET /cart",                       integration = "cart",     protected = true },
+    { name = "cart_add",        route_key = "POST /cart/add",                  integration = "cart",     protected = true },
+    { name = "cart_remove",     route_key = "DELETE /cart/remove/{id}",        integration = "cart",     protected = true },
+    { name = "cart_clear",      route_key = "DELETE /cart",                    integration = "cart",     protected = true },
+    { name = "wishlist_get",    route_key = "GET /wishlist",                   integration = "cart",     protected = true },
+    { name = "wishlist_add",    route_key = "POST /wishlist/add",              integration = "cart",     protected = true },
+    { name = "wishlist_remove", route_key = "DELETE /wishlist/remove/{id}",    integration = "cart",     protected = true },
+
+    # Saved Addresses
+    { name = "addresses_get",   route_key = "GET /addresses",                  integration = "cart",     protected = true },
+    { name = "addresses_post",  route_key = "POST /addresses",                 integration = "cart",     protected = true },
+    { name = "addresses_put",   route_key = "PUT /addresses/{id}",             integration = "cart",     protected = true },
+    { name = "addresses_del",   route_key = "DELETE /addresses/{id}",          integration = "cart",     protected = true },
+
+    # User profile (editable display name, phone, bio — stored in DynamoDB)
+    { name = "profile_get",     route_key = "GET /profile/me",                 integration = "cart",     protected = true },
+    { name = "profile_put",     route_key = "PUT /profile/me",                 integration = "cart",     protected = true },
+    { name = "profile_verify",  route_key = "POST /profile/verify-email",      integration = "cart",     protected = true },
+
+    # Orders (authenticated)
+    { name = "order_get_all",   route_key = "GET /order",                      integration = "order",    protected = true },
+    { name = "order_post",      route_key = "POST /order",                     integration = "order",    protected = true },
+    { name = "order_get",       route_key = "GET /order/{id}",                 integration = "order",    protected = true },
+    { name = "order_put",       route_key = "PUT /order/{id}",                 integration = "order",    protected = true },
+    { name = "order_cancel",    route_key = "DELETE /order/{id}",              integration = "order",    protected = true },
+
+    # Payment (authenticated)
+    { name = "payment",         route_key = "POST /payment",                   integration = "payment",  protected = true },
+
+    # Admin (authenticated — role checked inside Lambda)
+    { name = "admin_dashboard", route_key = "GET /admin/dashboard",            integration = "admin",    protected = true },
+    { name = "admin_products_get",  route_key = "GET /admin/products",         integration = "admin",    protected = true },
+    { name = "admin_products_post", route_key = "POST /admin/products",        integration = "admin",    protected = true },
+    { name = "admin_products_put",  route_key = "PUT /admin/products/{id}",    integration = "admin",    protected = true },
+    { name = "admin_products_del",  route_key = "DELETE /admin/products/{id}", integration = "admin",    protected = true },
+    { name = "admin_orders_get",    route_key = "GET /admin/orders",           integration = "admin",    protected = true },
+    { name = "admin_orders_put",    route_key = "PUT /admin/orders/{id}",      integration = "admin",    protected = true },
   ]
 }
 
@@ -84,14 +112,14 @@ resource "aws_apigatewayv2_route" "route" {
   authorizer_id      = each.value.protected ? aws_apigatewayv2_authorizer.auth0.id : null
 }
 
+# ── Lambda invoke permissions ─────────────────────────────────────────────────
 resource "aws_lambda_permission" "allow_api" {
   for_each = {
-    product = aws_lambda_function.function["product"].function_name
+    catalog = aws_lambda_function.function["catalog"].function_name
     cart    = aws_lambda_function.function["cart"].function_name
     order   = aws_lambda_function.function["order"].function_name
     payment = aws_lambda_function.function["payment"].function_name
-    search  = aws_lambda_function.function["search"].function_name
-    wishlist = aws_lambda_function.function["wishlist"].function_name
+    admin   = aws_lambda_function.function["admin"].function_name
   }
 
   statement_id  = "AllowExecution-${each.key}"

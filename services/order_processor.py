@@ -30,17 +30,23 @@ def update_inventory(items):
 
 def publish_shipping_notification(order):
     try:
-        account_id = sts.get_caller_identity()['Account']
-        topic_arn = f"arn:aws:sns:ap-southeast-1:{account_id}:order-notifications-guru"
-        
-        subject = f"Order Shipped: {order['order_id']}"
-        message = f"Great news! Your order {order['order_id']} has been fulfilled and shipped."
-        
-        sns.publish(
-            TopicArn=topic_arn,
-            Subject=subject,
-            Message=message
+        account_id  = sts.get_caller_identity()['Account']
+        region      = os.environ.get("AWS_REGION_NAME", "ap-southeast-1")
+        topic_name  = os.environ.get("SNS_TOPIC_NAME", "order-notifications-guru")
+        topic_arn   = f"arn:aws:sns:{region}:{account_id}:{topic_name}"
+        customer_email = order.get('user_email', '')
+        name           = order.get('address', {}).get('full_name', 'there')
+        city           = order.get('address', {}).get('city', '')
+
+        subject = f"Order Shipped: #{order['order_id'][:8].upper()}"
+        message = (
+            f"Hi {name},\n\n"
+            f"Great news! Your order #{order['order_id'][:8].upper()} has been shipped.\n"
+            f"Estimated delivery to {city} in 3-5 business days.\n\n"
+            f"customer_email: {customer_email}"
         )
+
+        sns.publish(TopicArn=topic_arn, Subject=subject, Message=message)
         print(f"INFO: Shipping notification sent for order {order['order_id']}")
     except Exception as e:
         print(f"ERROR publishing to SNS: {str(e)}")

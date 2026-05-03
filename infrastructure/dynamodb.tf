@@ -47,3 +47,14 @@ resource "aws_dynamodb_table" "wishlist_table" {
     type = "S"
   }
 }
+
+resource "aws_dynamodb_table" "user_data_table" {
+  name         = "user_data_table_guru"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "user_id"
+
+  attribute {
+    name = "user_id"
+    type = "S"
+  }
+}

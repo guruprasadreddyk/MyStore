@@ -40,6 +40,7 @@ terraform.rc
 
 node_modules/
 __pycache__/
+docs/
 
 *.zip
 

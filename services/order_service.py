@@ -4,15 +4,16 @@ import uuid
 import boto3
 from decimal import Decimal
 from botocore.exceptions import ClientError
-from utils import convert_decimal, response, get_user_id
+from utils import convert_decimal, response, get_user_id, get_user_email
 
 
 dynamodb = boto3.resource("dynamodb")
 sqs = boto3.client("sqs")
 sns = boto3.client("sns")
 sts = boto3.client("sts")
-orders_table = dynamodb.Table("orders_table_guru")
+orders_table  = dynamodb.Table("orders_table_guru")
 product_table = dynamodb.Table("products_table_guru")
+cart_table    = dynamodb.Table("cart_table_guru")
 cart_table = dynamodb.Table("cart_table_guru")
 
 
@@ -140,17 +141,23 @@ def send_order_to_queue(order):
 def publish_order_notification(order):
     try:
         account_id = sts.get_caller_identity()['Account']
-        topic_arn = f"arn:aws:sns:ap-southeast-1:{account_id}:order-notifications-guru"
-        
-        subject = f"New Order Created: {order['order_id']}"
-        message = f"Order {order['order_id']} has been created with {len(order['items'])} items."
-        
-        sns.publish(
-            TopicArn=topic_arn,
-            Subject=subject,
-            Message=message
+        region     = os.environ.get("AWS_REGION_NAME", "ap-southeast-1")
+        topic_name = os.environ.get("SNS_TOPIC_NAME", "order-notifications-guru")
+        topic_arn  = f"arn:aws:sns:{region}:{account_id}:{topic_name}"
+
+        subject = f"Order Confirmed: #{order['order_id'][:8].upper()}"
+        message = (
+            f"Hi {order.get('address', {}).get('full_name', 'there')},\n\n"
+            f"Your order #{order['order_id'][:8].upper()} has been placed successfully.\n"
+            f"Items: {len(order['items'])}\n"
+            f"Grand Total: ₹{order.get('grand_total', 0):,}\n"
+            f"Delivery to: {order.get('address', {}).get('city', '')}, "
+            f"{order.get('address', {}).get('state', '')}\n"
+            f"Customer: {order.get('user_email', '')}"
         )
-        print(f"INFO: Notification sent for order {order['order_id']}")
+
+        sns.publish(TopicArn=topic_arn, Subject=subject, Message=message)
+        print(f"INFO: Order notification sent for {order['order_id']}")
     except Exception as e:
         print(f"ERROR publishing to SNS: {str(e)}")
 
@@ -178,7 +185,8 @@ def get_all_orders(user_id):
 
 def lambda_handler(event, context):
     try:
-        user_id = get_user_id(event)
+        user_id    = get_user_id(event)
+        user_email = get_user_email(event)
         path = event.get("rawPath") or event.get("path", "")
         method = event.get("requestContext", {}).get("http", {}).get("method", "")
 
@@ -195,10 +203,27 @@ def lambda_handler(event, context):
 
         # 🔹 POST /order
         if path == "/order" and method == "POST":
-            body = json.loads(event.get("body") or "{}")
+            body  = json.loads(event.get("body") or "{}")
             items = body.get("items", [])
 
-            # ✅ validation
+            # ── Address validation ────────────────────────────────────────────
+            address = body.get("address", {})
+            required_address_fields = ["full_name", "phone", "address_line1", "city", "state", "pincode"]
+            missing = [f for f in required_address_fields if not address.get(f, "").strip()]
+            if missing:
+                return response(400, message=f"Missing address fields: {', '.join(missing)}")
+
+            # Basic phone validation
+            phone = address["phone"].strip()
+            if not phone.isdigit() or len(phone) != 10:
+                return response(400, message="Phone must be a 10-digit number")
+
+            # Basic PIN code validation
+            pincode = address["pincode"].strip()
+            if not pincode.isdigit() or len(pincode) != 6:
+                return response(400, message="PIN code must be a 6-digit number")
+
+            # ── Items validation ──────────────────────────────────────────────
             if not items or not isinstance(items, list):
                 return response(400, message="Items list is required")
             
@@ -255,21 +280,33 @@ def lambda_handler(event, context):
             if not success:
                 return response(400, message=f"Insufficient stock for product {failed_product_id}")
 
+            # ── Pricing breakdown ─────────────────────────────────────────────
+            subtotal         = sum(i["price"] * i["quantity"] for i in processed_items)
+            delivery_charge  = 0 if subtotal >= 500 else 49
+            gst              = round(subtotal * 0.18)
+            grand_total      = subtotal + delivery_charge + gst
+
             order = {
-                "order_id": str(uuid.uuid4()),
-                "user_id": user_id,
-                "items": processed_items,
-                "status": "created"
+                "order_id":       str(uuid.uuid4()),
+                "user_id":        user_id,
+                "user_email":     user_email,
+                "items":          processed_items,
+                "address":        address,
+                "subtotal":       subtotal,
+                "delivery_charge":delivery_charge,
+                "gst":            gst,
+                "grand_total":    grand_total,
+                "status":         "created"
             }
 
             save_order(order)
             clear_cart(user_id)
 
-            # Send order to SQS for processing
-            send_order_to_queue(order)
-            
-            # Publish notification to SNS
+            # Notify SNS that order was created (informational only)
             publish_order_notification(order)
+
+            # SQS fulfillment is triggered by payment_service after payment succeeds,
+            # not here — ensures shipped status only follows confirmed payment.
 
             return response(200, data=order, message="Order created successfully")
 
@@ -301,6 +338,32 @@ def lambda_handler(event, context):
             save_order(order)
 
             return response(200, data=order, message="Order updated")
+
+        # 🔹 DELETE /order/{id} → cancel order
+        if path.startswith("/order/") and method == "DELETE":
+            order_id = path.split("/")[-1]
+
+            order = get_order_by_id(order_id)
+
+            if not order:
+                return response(404, message="Order not found")
+
+            # Only the order owner can cancel
+            if order.get("user_id") != user_id:
+                return response(403, message="Not authorised to cancel this order")
+
+            # Only cancellable before payment
+            cancellable = {"created"}
+            if order.get("status") not in cancellable:
+                return response(400, message=f"Cannot cancel an order with status '{order.get('status')}'. Only orders in 'created' state can be cancelled.")
+
+            # Restore inventory for each item
+            _rollback_inventory(order.get("items", []))
+
+            order["status"] = "cancelled"
+            save_order(order)
+
+            return response(200, data=order, message="Order cancelled and inventory restored")
 
         # 🔹 Invalid route
         return response(404, message="Route not found")

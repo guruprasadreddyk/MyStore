@@ -14,6 +14,6 @@ terraform {
 }
 
 provider "aws" {
-  region  = "ap-southeast-1"
-  profile = "idp-sbx-trn-lab-01"
+  region  = var.aws_region
+  profile = var.aws_profile
 }

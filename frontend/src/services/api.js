@@ -98,11 +98,17 @@ export const removeFromCart = async (productId, headers) =>
     headers,
   });
 
-export const placeOrder = async (items, headers) =>
+export const placeOrder = async (items, address, headers) =>
   apiFetch('/order', {
     method: 'POST',
     headers,
-    body: { items },
+    body: { items, address },
+  });
+
+export const cancelOrder = async (orderId, headers) =>
+  apiFetch(`/order/${orderId}`, {
+    method: 'DELETE',
+    headers,
   });
 
 export const processPayment = async (orderId, amount, headers) =>
@@ -131,3 +137,24 @@ export const removeFromWishlistApi = async (productId, headers) =>
     method: 'DELETE',
     headers,
   });
+
+// ── Saved Addresses ───────────────────────────────────────────────────────────
+export const fetchAddresses = async (headers) => apiFetch('/addresses', { headers });
+
+export const addAddress = async (address, headers) =>
+  apiFetch('/addresses', { method: 'POST', headers, body: address });
+
+export const setDefaultAddress = async (addressId, headers) =>
+  apiFetch(`/addresses/${addressId}`, { method: 'PUT', headers });
+
+export const deleteAddress = async (addressId, headers) =>
+  apiFetch(`/addresses/${addressId}`, { method: 'DELETE', headers });
+
+// ── User Profile ──────────────────────────────────────────────────────────────
+export const fetchProfile = async (headers) => apiFetch('/profile/me', { headers });
+
+export const updateProfile = async (profile, headers) =>
+  apiFetch('/profile/me', { method: 'PUT', headers, body: profile });
+
+export const sendVerificationEmail = async (headers) =>
+  apiFetch('/profile/verify-email', { method: 'POST', headers });

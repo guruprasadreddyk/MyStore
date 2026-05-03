@@ -45,3 +45,11 @@ def get_user_id(event):
         return event['requestContext']['authorizer']['jwt']['claims']['sub']
     except KeyError:
         return "user1"
+
+
+# 🔹 Extract user email from Auth0 JWT Authorizer
+def get_user_email(event):
+    try:
+        return event['requestContext']['authorizer']['jwt']['claims'].get('email', '')
+    except (KeyError, AttributeError):
+        return ''

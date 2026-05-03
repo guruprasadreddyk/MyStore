@@ -5,7 +5,7 @@ import pytest
 import boto3
 from moto import mock_aws
 import json
-from services.cart_service import lambda_handler, convert_decimal
+from services.user_service import lambda_handler, convert_decimal
 
 @mock_aws
 class TestCartService:
@@ -31,12 +31,24 @@ class TestCartService:
         # Products table
         self.product_table = dynamodb.create_table(
             TableName='products_table_guru',
-            KeySchema=[
-                {'AttributeName': 'id', 'KeyType': 'HASH'}
-            ],
-            AttributeDefinitions=[
-                {'AttributeName': 'id', 'AttributeType': 'S'}
-            ],
+            KeySchema=[{'AttributeName': 'id', 'KeyType': 'HASH'}],
+            AttributeDefinitions=[{'AttributeName': 'id', 'AttributeType': 'S'}],
+            BillingMode='PAY_PER_REQUEST'
+        )
+
+        # user_data_table (addresses + profile)
+        self.user_data_table = dynamodb.create_table(
+            TableName='user_data_table_guru',
+            KeySchema=[{'AttributeName': 'user_id', 'KeyType': 'HASH'}],
+            AttributeDefinitions=[{'AttributeName': 'user_id', 'AttributeType': 'S'}],
+            BillingMode='PAY_PER_REQUEST'
+        )
+
+        # wishlist table
+        self.wishlist_table = dynamodb.create_table(
+            TableName='wishlist_table_guru',
+            KeySchema=[{'AttributeName': 'user_id', 'KeyType': 'HASH'}],
+            AttributeDefinitions=[{'AttributeName': 'user_id', 'AttributeType': 'S'}],
             BillingMode='PAY_PER_REQUEST'
         )
 

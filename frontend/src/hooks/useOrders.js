@@ -4,7 +4,8 @@ import {
   fetchOrders as fetchOrdersApi,
   getHeaders,
   placeOrder as placeOrderApi,
-  processPayment as processPaymentApi
+  processPayment as processPaymentApi,
+  cancelOrder as cancelOrderApi
 } from '../services/api';
 
 export default function useOrders() {
@@ -36,7 +37,7 @@ export default function useOrders() {
     loadOrders();
   }, [isAuthenticated]);
 
-  const placeOrder = async (items) => {
+  const placeOrder = async (items, address) => {
     if (!isAuthenticated) {
       return { status: 'error', message: 'Authentication required' };
     }
@@ -44,7 +45,7 @@ export default function useOrders() {
     setLoading(true);
     try {
       const headers = await getHeaders(isAuthenticated, getAccessTokenSilently);
-      const data = await placeOrderApi(items, headers);
+      const data = await placeOrderApi(items, address, headers);
 
       if (data.status === 'success') {
         loadOrders();
@@ -82,11 +83,30 @@ export default function useOrders() {
     }
   };
 
+  const cancelOrder = async (orderId) => {
+    if (!isAuthenticated) {
+      return { status: 'error', message: 'Authentication required' };
+    }
+    setLoading(true);
+    try {
+      const headers = await getHeaders(isAuthenticated, getAccessTokenSilently);
+      const data = await cancelOrderApi(orderId, headers);
+      if (data.status === 'success') loadOrders();
+      return data;
+    } catch (error) {
+      console.error('Error cancelling order:', error);
+      return { status: 'error', message: 'Unable to cancel order' };
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return {
     orders,
     loading,
     loadOrders,
     placeOrder,
     processPayment,
+    cancelOrder,
   };
 }
