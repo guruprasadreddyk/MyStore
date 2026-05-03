@@ -33,7 +33,10 @@ function AddressesPage() {
     setLoading(false);
   };
 
-  useEffect(() => { load(); }, [isAuthenticated]);
+  useEffect(() => {
+    load();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated]);
 
   const validate = () => {
     const e = {};

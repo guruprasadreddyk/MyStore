@@ -100,6 +100,7 @@ function ProductsTab({ getAccessTokenSilently, isAuthenticated }) {
   useEffect(() => {
     adminFetch('/admin/products', {}, getAccessTokenSilently, isAuthenticated)
       .then(d => { if (d.status === 'success') setProducts(d.data); });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const saveEdit = async () => {
@@ -196,7 +197,7 @@ function OrdersTab({ getAccessTokenSilently, isAuthenticated }) {
     if (d.status === 'success') setOrders(d.data);
   };
 
-  useEffect(() => { loadOrders(); }, []);
+  useEffect(() => { loadOrders(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const updateStatus = async (orderId, newStatus) => {
     const d = await adminFetch(`/admin/orders/${orderId}`, { method: 'PUT', body: { status: newStatus } }, getAccessTokenSilently, isAuthenticated);
@@ -277,6 +278,7 @@ export default function AdminPanel() {
         setAllowed(Array.isArray(roles) ? roles.includes('admin') : roles === 'admin');
       })
       .catch(() => setAllowed(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
 
   useEffect(() => {
@@ -284,6 +286,7 @@ export default function AdminPanel() {
       adminFetch('/admin/dashboard', {}, getAccessTokenSilently, isAuthenticated)
         .then(d => { if (d.status === 'success') setStats(d.data); });
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allowed, tab]);
 
   if (allowed === null) return <div style={{ padding: '40px', opacity: 0.5 }}>Checking access...</div>;

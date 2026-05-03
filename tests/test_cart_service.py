@@ -173,3 +173,185 @@ class TestCartService:
         result = convert_decimal(test_data)
         assert result['price'] == 100.5
         assert result['items'] == [1, 2.5, {'nested': 3.7}]
+
+
+# ── Address tests ─────────────────────────────────────────────────────────────
+
+    def test_get_addresses_empty(self):
+        event = {'rawPath': '/addresses', 'requestContext': {'http': {'method': 'GET'}}}
+        response = lambda_handler(event, {})
+        assert response['statusCode'] == 200
+        data = json.loads(response['body'])
+        assert data['data'] == []
+
+    def test_add_address_success(self):
+        event = {
+            'rawPath': '/addresses',
+            'requestContext': {'http': {'method': 'POST'}},
+            'body': json.dumps({
+                'full_name': 'Test User', 'phone': '9876543210',
+                'address_line1': '123 Test St', 'city': 'Mumbai',
+                'state': 'Maharashtra', 'pincode': '400001'
+            })
+        }
+        response = lambda_handler(event, {})
+        assert response['statusCode'] == 200
+        data = json.loads(response['body'])
+        assert len(data['data']) == 1
+        assert data['data'][0]['full_name'] == 'Test User'
+        assert data['data'][0]['is_default'] is True  # first address is default
+
+    def test_add_address_invalid_phone(self):
+        event = {
+            'rawPath': '/addresses',
+            'requestContext': {'http': {'method': 'POST'}},
+            'body': json.dumps({
+                'full_name': 'Test User', 'phone': '12345',
+                'address_line1': '123 Test St', 'city': 'Mumbai',
+                'state': 'Maharashtra', 'pincode': '400001'
+            })
+        }
+        response = lambda_handler(event, {})
+        assert response['statusCode'] == 400
+        data = json.loads(response['body'])
+        assert 'Phone' in data['message']
+
+    def test_add_address_invalid_pincode(self):
+        event = {
+            'rawPath': '/addresses',
+            'requestContext': {'http': {'method': 'POST'}},
+            'body': json.dumps({
+                'full_name': 'Test User', 'phone': '9876543210',
+                'address_line1': '123 Test St', 'city': 'Mumbai',
+                'state': 'Maharashtra', 'pincode': '123'
+            })
+        }
+        response = lambda_handler(event, {})
+        assert response['statusCode'] == 400
+        data = json.loads(response['body'])
+        assert 'PIN' in data['message']
+
+    def test_set_default_address(self):
+        # Add two addresses
+        for name, phone in [('User A', '9876543210'), ('User B', '9123456780')]:
+            lambda_handler({
+                'rawPath': '/addresses',
+                'requestContext': {'http': {'method': 'POST'}},
+                'body': json.dumps({
+                    'full_name': name, 'phone': phone,
+                    'address_line1': '123 St', 'city': 'Mumbai',
+                    'state': 'Maharashtra', 'pincode': '400001'
+                })
+            }, {})
+
+        # Get addresses to find second one's ID
+        get_resp = lambda_handler({'rawPath': '/addresses', 'requestContext': {'http': {'method': 'GET'}}}, {})
+        addresses = json.loads(get_resp['body'])['data']
+        second_id = addresses[1]['address_id']
+
+        # Set second as default
+        event = {
+            'rawPath': f'/addresses/{second_id}',
+            'requestContext': {'http': {'method': 'PUT'}}
+        }
+        response = lambda_handler(event, {})
+        assert response['statusCode'] == 200
+        data = json.loads(response['body'])
+        defaults = [a for a in data['data'] if a['is_default']]
+        assert len(defaults) == 1
+        assert defaults[0]['address_id'] == second_id
+
+    def test_delete_address(self):
+        # Add an address
+        lambda_handler({
+            'rawPath': '/addresses',
+            'requestContext': {'http': {'method': 'POST'}},
+            'body': json.dumps({
+                'full_name': 'Test User', 'phone': '9876543210',
+                'address_line1': '123 St', 'city': 'Mumbai',
+                'state': 'Maharashtra', 'pincode': '400001'
+            })
+        }, {})
+
+        # Get its ID
+        get_resp = lambda_handler({'rawPath': '/addresses', 'requestContext': {'http': {'method': 'GET'}}}, {})
+        addr_id = json.loads(get_resp['body'])['data'][0]['address_id']
+
+        # Delete it
+        event = {
+            'rawPath': f'/addresses/{addr_id}',
+            'requestContext': {'http': {'method': 'DELETE'}}
+        }
+        response = lambda_handler(event, {})
+        assert response['statusCode'] == 200
+        data = json.loads(response['body'])
+        assert data['data'] == []
+
+    def test_delete_address_not_found(self):
+        event = {
+            'rawPath': '/addresses/nonexistent-id',
+            'requestContext': {'http': {'method': 'DELETE'}}
+        }
+        response = lambda_handler(event, {})
+        assert response['statusCode'] == 404
+
+# ── Profile tests ─────────────────────────────────────────────────────────────
+
+    def test_get_profile_empty(self):
+        event = {'rawPath': '/profile/me', 'requestContext': {'http': {'method': 'GET'}}}
+        response = lambda_handler(event, {})
+        assert response['statusCode'] == 200
+        data = json.loads(response['body'])
+        assert data['data'] == {}
+
+    def test_update_profile_success(self):
+        event = {
+            'rawPath': '/profile/me',
+            'requestContext': {'http': {'method': 'PUT'}},
+            'body': json.dumps({'display_name': 'Guru', 'phone': '9876543210', 'bio': 'Developer'})
+        }
+        response = lambda_handler(event, {})
+        assert response['statusCode'] == 200
+        data = json.loads(response['body'])
+        assert data['data']['display_name'] == 'Guru'
+        assert data['data']['phone'] == '9876543210'
+        assert data['data']['bio'] == 'Developer'
+
+    def test_update_profile_invalid_phone(self):
+        event = {
+            'rawPath': '/profile/me',
+            'requestContext': {'http': {'method': 'PUT'}},
+            'body': json.dumps({'phone': '123'})
+        }
+        response = lambda_handler(event, {})
+        assert response['statusCode'] == 400
+        data = json.loads(response['body'])
+        assert 'Phone' in data['message']
+
+    def test_update_profile_ignores_unknown_fields(self):
+        """Only display_name, phone, bio are allowed — unknown fields silently ignored."""
+        event = {
+            'rawPath': '/profile/me',
+            'requestContext': {'http': {'method': 'PUT'}},
+            'body': json.dumps({'display_name': 'Guru', 'email': 'hack@evil.com', 'role': 'admin'})
+        }
+        response = lambda_handler(event, {})
+        assert response['statusCode'] == 200
+        data = json.loads(response['body'])
+        assert 'email' not in data['data']
+        assert 'role' not in data['data']
+        assert data['data']['display_name'] == 'Guru'
+
+    def test_profile_persists_after_update(self):
+        """Profile saved to DynamoDB should be readable back."""
+        lambda_handler({
+            'rawPath': '/profile/me',
+            'requestContext': {'http': {'method': 'PUT'}},
+            'body': json.dumps({'display_name': 'Guru', 'bio': 'Dev'})
+        }, {})
+
+        get_event = {'rawPath': '/profile/me', 'requestContext': {'http': {'method': 'GET'}}}
+        response = lambda_handler(get_event, {})
+        data = json.loads(response['body'])
+        assert data['data']['display_name'] == 'Guru'
+        assert data['data']['bio'] == 'Dev'

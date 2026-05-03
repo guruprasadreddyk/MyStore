@@ -35,6 +35,19 @@ resource "aws_dynamodb_table" "orders_table" {
     name = "order_id"
     type = "S"
   }
+
+  attribute {
+    name = "user_id"
+    type = "S"
+  }
+
+  # GSI: allows efficient query of all orders by user_id
+  # Replaces the current full table scan + Python filter in get_all_orders()
+  global_secondary_index {
+    name            = "user_id-index"
+    hash_key        = "user_id"
+    projection_type = "ALL"
+  }
 }
 
 resource "aws_dynamodb_table" "wishlist_table" {

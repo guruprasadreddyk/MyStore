@@ -27,6 +27,7 @@ export default function useWishlist() {
 
   useEffect(() => {
     loadWishlist();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
 
   const toggleWishlist = async (product) => {

@@ -19,6 +19,7 @@ export default function useProducts() {
 
   useEffect(() => {
     fetchProducts();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -104,10 +105,8 @@ export default function useProducts() {
 
         if (data.status === 'success') {
           const newProducts = data.data.items || [];
-          // Avoid duplicates
-          const newUniqueProducts = newProducts.filter(
-            p => !allFetchedProducts.some(existing => existing.id === p.id)
-          );
+          const existingIds = new Set(allFetchedProducts.map(p => p.id));
+          const newUniqueProducts = newProducts.filter(p => !existingIds.has(p.id));
           allFetchedProducts = [...allFetchedProducts, ...newUniqueProducts];
           
           currentKey = data.data.lastEvaluatedKey || null;

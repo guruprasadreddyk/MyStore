@@ -173,11 +173,14 @@ def get_order_by_id(order_id):
 
 
 def get_all_orders(user_id):
+    """Query orders by user_id using the GSI — no full table scan."""
     try:
-        result = orders_table.scan()
-        items = result.get("Items", [])
-        user_items = [item for item in items if item.get("user_id") == user_id]
-        return convert_decimal(user_items)
+        from boto3.dynamodb.conditions import Key
+        result = orders_table.query(
+            IndexName="user_id-index",
+            KeyConditionExpression=Key("user_id").eq(user_id)
+        )
+        return convert_decimal(result.get("Items", []))
     except Exception as e:
         print(f"ERROR loading orders: {str(e)}")
         return []

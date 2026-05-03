@@ -35,6 +35,7 @@ export default function useOrders() {
 
   useEffect(() => {
     loadOrders();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
 
   const placeOrder = async (items, address) => {

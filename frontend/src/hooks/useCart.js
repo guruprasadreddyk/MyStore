@@ -34,6 +34,7 @@ export default function useCart() {
 
   useEffect(() => {
     loadCart();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
 
   const addToCart = async (productId) => {

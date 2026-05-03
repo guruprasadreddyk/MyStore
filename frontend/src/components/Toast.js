@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect } from 'react';
 import './Toast.css';
 
 export default function Toast({ message, type = 'success', onClose }) {
