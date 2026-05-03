@@ -48,3 +48,6 @@ pytest_cache/
 *.zip
 
 *.log
+
+# React build output — deployed to S3, not needed in git
+frontend/build/
