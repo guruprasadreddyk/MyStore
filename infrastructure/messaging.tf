@@ -43,11 +43,13 @@ resource "aws_sns_topic_policy" "order_notifications_policy" {
 }
 
 # SNS Subscription: Send notifications to SQS queue
-resource "aws_sns_topic_subscription" "order_notifications_to_sqs" {
-  topic_arn = aws_sns_topic.order_notifications.arn
-  protocol  = "sqs"
-  endpoint  = aws_sqs_queue.order_processing.arn
-}
+# NOTE: Removed — order_processor is now triggered directly by payment_service
+# after payment succeeds, not via SNS. This prevents SNS envelope wrapping issues.
+# resource "aws_sns_topic_subscription" "order_notifications_to_sqs" {
+#   topic_arn = aws_sns_topic.order_notifications.arn
+#   protocol  = "sqs"
+#   endpoint  = aws_sqs_queue.order_processing.arn
+# }
 
 # SNS Subscription: Send email notifications (replace with your email)
 resource "aws_sns_topic_subscription" "order_notifications_email" {
@@ -56,24 +58,18 @@ resource "aws_sns_topic_subscription" "order_notifications_email" {
   endpoint  = var.notification_email
 }
 
-# SQS Queue Policy: Allow SNS to send messages
+# SQS Queue Policy: Allow payment_service Lambda to send messages directly
+# SNS no longer sends to this queue — payment_service sends directly after payment succeeds
 resource "aws_sqs_queue_policy" "order_processing_policy" {
   queue_url = aws_sqs_queue.order_processing.id
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Effect = "Allow"
-      Principal = {
-        Service = "sns.amazonaws.com"
-      }
-      Action   = "sqs:SendMessage"
-      Resource = aws_sqs_queue.order_processing.arn
-      Condition = {
-        ArnEquals = {
-          "aws:SourceArn" = aws_sns_topic.order_notifications.arn
-        }
-      }
+      Effect    = "Allow"
+      Principal = { AWS = aws_iam_role.lambda_role.arn }
+      Action    = "sqs:SendMessage"
+      Resource  = aws_sqs_queue.order_processing.arn
     }]
   })
 }
