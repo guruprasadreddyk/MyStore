@@ -30,27 +30,29 @@ resource "aws_cloudfront_origin_access_identity" "frontend" {
 }
 
 # -------------------------
-# S3 POLICY (RESTORE OAI ACCESS - FILES UPLOADED SUCCESSFULLY)
+# S3 POLICY
 # -------------------------
+data "aws_iam_policy_document" "frontend_bucket_policy" {
+  statement {
+    sid     = "AllowCloudFrontAccess"
+    effect  = "Allow"
+    actions = ["s3:GetObject"]
+    resources = ["${aws_s3_bucket.frontend.arn}/*"]
+
+    principals {
+      type        = "CanonicalUser"
+      identifiers = [aws_cloudfront_origin_access_identity.frontend.s3_canonical_user_id]
+    }
+  }
+}
+
 resource "aws_s3_bucket_policy" "frontend" {
   bucket = aws_s3_bucket.frontend.id
+  policy = data.aws_iam_policy_document.frontend_bucket_policy.json
 
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid    = "AllowCloudFrontAccess"
-        Effect = "Allow"
-
-        Principal = {
-          CanonicalUser = aws_cloudfront_origin_access_identity.frontend.s3_canonical_user_id
-        }
-
-        Action   = "s3:GetObject"
-        Resource = "${aws_s3_bucket.frontend.arn}/*"
-      }
-    ]
-  })
+  lifecycle {
+    ignore_changes = [policy]
+  }
 }
 
 # -------------------------
