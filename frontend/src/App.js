@@ -70,8 +70,8 @@ function App() {
     submitReview,
   } = useOrders();
 
-  const { recommendations, showRecommendations } = useRecommendations(cart, orders);
   const { wishlist, toggleWishlist, isInWishlist } = useWishlist();
+  const { recommendations, showRecommendations } = useRecommendations(cart, orders, wishlist, searchQuery);
 
   const handleToggleWishlist = async (product) => {
     const res = await toggleWishlist(product);

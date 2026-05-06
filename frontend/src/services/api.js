@@ -63,6 +63,9 @@ export const getHeaders = async (isAuthenticated, getAccessTokenSilently) => {
   return headers;
 };
 
+export const fetchProductById = async (productId) =>
+  apiFetch(`/products/${productId}`);
+
 export const fetchProducts = async ({ lastEvaluatedKey, minPrice, maxPrice, category, sortBy } = {}) => {
   const query = {
     limit: 10,

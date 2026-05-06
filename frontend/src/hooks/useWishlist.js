@@ -1,11 +1,38 @@
 import { useState, useEffect } from 'react';
 import { useAuth0 } from '@auth0/auth0-react';
-import { getHeaders, fetchWishlist, addToWishlistApi, removeFromWishlistApi } from '../services/api';
+import { getHeaders, fetchWishlist, addToWishlistApi, removeFromWishlistApi, fetchProductById } from '../services/api';
 
 export default function useWishlist() {
   const [wishlist, setWishlist] = useState([]);
   const [loading, setLoading] = useState(false);
   const { getAccessTokenSilently, isAuthenticated } = useAuth0();
+
+  // Enrich wishlist items that are missing variants/stock data
+  // (items saved before the backend fix won't have these fields)
+  const enrichWishlist = async (items) => {
+    const enriched = await Promise.all(
+      items.map(async (item) => {
+        // Already has full data — no need to fetch
+        if (item.variants !== undefined && item.stock_quantity !== undefined) {
+          return item;
+        }
+        try {
+          const res = await fetchProductById(item.id);
+          if (res.status === 'success' && res.data) {
+            // Merge fresh product data with stored wishlist item
+            return {
+              ...res.data,
+              id: item.id, // keep as string to be safe
+            };
+          }
+        } catch {
+          // If fetch fails, return the item as-is
+        }
+        return item;
+      })
+    );
+    return enriched;
+  };
 
   const loadWishlist = async () => {
     if (!isAuthenticated) return;
@@ -16,7 +43,10 @@ export default function useWishlist() {
       const data = await fetchWishlist(headers);
 
       if (data.status === 'success') {
-        setWishlist(data.data || []);
+        const items = data.data || [];
+        // Enrich items missing variants/stock before setting state
+        const enriched = await enrichWishlist(items);
+        setWishlist(enriched);
       }
     } catch (error) {
       console.error('Error fetching wishlist:', error);
@@ -36,7 +66,7 @@ export default function useWishlist() {
     }
 
     const isWishlisted = wishlist.some(item => item.id === product.id);
-    
+
     // Optimistic UI update
     setWishlist(prev => {
       if (isWishlisted) {
@@ -56,15 +86,16 @@ export default function useWishlist() {
       }
 
       if (data.status === 'success') {
-        setWishlist(data.data || []);
+        // Enrich the returned items too
+        const enriched = await enrichWishlist(data.data || []);
+        setWishlist(enriched);
       } else {
-        // Revert on failure
         loadWishlist();
       }
       return data;
     } catch (error) {
       console.error('Error toggling wishlist:', error);
-      loadWishlist(); // Revert on error
+      loadWishlist();
       return { status: 'error', message: 'Unable to update wishlist' };
     }
   };

@@ -76,9 +76,11 @@ function ProductCard({ product, addToCart, loading, toggleWishlist, isWishlisted
         <p className="product-description">{product.description}</p>
         <div className="product-details">
           <span className="product-price">₹{product.price.toLocaleString('en-IN')}</span>
-          <span className={`product-stock ${product.stock_quantity > 0 ? 'in-stock' : 'out-of-stock'}`}>
-            {product.stock_quantity > 0 ? `In Stock (${product.stock_quantity})` : 'Out of Stock'}
-          </span>
+          {product.stock_quantity !== undefined && (
+            <span className={`product-stock ${product.stock_quantity > 0 ? 'in-stock' : 'out-of-stock'}`}>
+              {product.stock_quantity > 0 ? `In Stock (${product.stock_quantity})` : 'Out of Stock'}
+            </span>
+          )}
         </div>
         <div className="product-rating">
           ⭐ {product.rating}/5
@@ -139,10 +141,10 @@ function ProductCard({ product, addToCart, loading, toggleWishlist, isWishlisted
         <button
           className="btn-primary"
           onClick={handleAddToCart}
-          disabled={loading || product.stock_quantity <= 0}
+          disabled={loading || product.stock_quantity === 0}
           style={{ flex: 1 }}
         >
-          {product.stock_quantity > 0 ? 'Add to Cart' : 'Out of Stock'}
+          {product.stock_quantity === 0 ? 'Out of Stock' : 'Add to Cart'}
         </button>
       </div>
     </div>

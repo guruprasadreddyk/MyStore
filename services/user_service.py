@@ -13,6 +13,7 @@ import os
 import time
 import urllib.request
 import boto3
+from decimal import Decimal
 from utils import response, send_email_via_resend
 from validation import validate
 
@@ -282,12 +283,26 @@ def lambda_handler(event, context):
             wishlist = get_wishlist(user_id)
             if any(str(i.get("id")) == product_id for i in wishlist):
                 return response(400, message="Item already in wishlist")
+            # Convert variant prices back to Decimal for DynamoDB storage
+            raw_variants = product.get("variants", [])
+            safe_variants = []
+            for v in raw_variants:
+                safe_v = dict(v)
+                if "price" in safe_v:
+                    safe_v["price"] = Decimal(str(safe_v["price"]))
+                safe_variants.append(safe_v)
+
             wishlist.append({
-                "id":       product["id"],
-                "name":     product["name"],
-                "price":    product["price"],
-                "category": product.get("category", "General"),
-                "image_url":product.get("image_url", "")
+                "id":             product["id"],
+                "name":           product["name"],
+                "price":          int(product["price"]),
+                "category":       product.get("category", "General"),
+                "image_url":      product.get("image_url", ""),
+                "stock_quantity": int(product.get("stock_quantity", 0)),
+                "rating":         Decimal(str(product.get("rating", 0))),
+                "review_count":   int(product.get("review_count", 0)),
+                "variants":       safe_variants,
+                "description":    product.get("description", "")
             })
             save_wishlist(user_id, wishlist)
             return response(200, data=convert_decimal(wishlist), message="Item added to wishlist")

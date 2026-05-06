@@ -1,56 +1,67 @@
 import { useEffect, useRef, useState } from 'react';
-import { fetchRecommendations as fetchRecommendationsApi } from '../services/api';
+import { fetchRecommendations as fetchRecommendationsApi, fetchProducts } from '../services/api';
 
-export default function useRecommendations(cart, orders = []) {
+export default function useRecommendations(cart, orders = [], wishlist = [], searchQuery = '') {
   const [recommendations, setRecommendations] = useState([]);
-  const [showRecommendations, setShowRecommendations] = useState(false);
-  // Track the last set of product IDs we fetched for — avoid redundant API calls
   const lastFetchedIds = useRef('');
 
   useEffect(() => {
     const fetchRecommendations = async () => {
-      // Collect product IDs from cart
+      // 1. Cart items
       const cartIds = cart.map((item) => String(item.id));
 
-      // Collect product IDs from all past orders
+      // 2. Past order items
       const orderIds = orders.flatMap((order) =>
         (order.items || []).map((item) => String(item.id))
       );
 
-      // Deduplicate and combine
-      const allIds = [...new Set([...cartIds, ...orderIds])];
+      // 3. Wishlist items
+      const wishlistIds = wishlist.map((item) => String(item.id));
 
-      if (allIds.length === 0) {
-        // No cart items and no order history — nothing to recommend from
-        // But keep existing recommendations visible if we already have some
-        if (recommendations.length === 0) {
-          setShowRecommendations(false);
-        }
-        return;
-      }
+      // 4. Search query — seed from cart/wishlist items matching the query
+      const searchIds = searchQuery.trim().length >= 2
+        ? [...cart, ...wishlist]
+            .filter((p) =>
+              p.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+              p.category?.toLowerCase().includes(searchQuery.toLowerCase())
+            )
+            .map((p) => String(p.id))
+        : [];
 
+      const allIds = [...new Set([...cartIds, ...orderIds, ...wishlistIds, ...searchIds])];
       const idsKey = allIds.sort().join(',');
 
-      // Skip fetch if the product pool hasn't changed
+      // Skip if nothing changed
       if (idsKey === lastFetchedIds.current) return;
       lastFetchedIds.current = idsKey;
 
       try {
-        const data = await fetchRecommendationsApi(allIds.join(','), 6);
-        if (data.status === 'success' && data.data?.length > 0) {
-          setRecommendations(data.data);
-          setShowRecommendations(true);
+        if (allIds.length > 0) {
+          // Personalised recommendations based on user activity
+          const data = await fetchRecommendationsApi(allIds.join(','), 8);
+          if (data.status === 'success' && data.data?.length > 0) {
+            setRecommendations(data.data);
+            return;
+          }
         }
-        // On failure, keep whatever recommendations we already have
+
+        // Fallback: no activity yet — show top-rated products
+        const fallback = await fetchProducts({ sortBy: 'price_high_low' });
+        if (fallback.status === 'success') {
+          const items = (fallback.data?.items || [])
+            .sort((a, b) => (b.rating || 0) - (a.rating || 0))
+            .slice(0, 8);
+          setRecommendations(items);
+        }
       } catch (error) {
         console.error('Error fetching recommendations:', error);
-        // Keep existing recommendations on error
       }
     };
 
     fetchRecommendations();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cart, orders]);
+  }, [cart, orders, wishlist, searchQuery]);
 
-  return { recommendations, showRecommendations };
+  // Always show — recommendations are permanent
+  return { recommendations, showRecommendations: recommendations.length > 0 };
 }
