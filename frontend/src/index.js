@@ -13,10 +13,12 @@ root.render(
   clientId="hZwfuIDn9Bsh8W6mI95fboh5Tqbbn94x"
   authorizationParams={{
     redirect_uri: window.location.origin,
-    audience: "https://api.mystore.com"
+    audience: "https://api.mystore.com",
+    scope: "openid profile email"
   }}
-  cacheLocation="localstorage" 
-  useRefreshTokens={true}     
+  cacheLocation="localstorage"
+  useRefreshTokens={true}
+  useRefreshTokensFallback={true}
 >
       <BrowserRouter>
         <App />

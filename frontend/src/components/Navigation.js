@@ -1,15 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth0 } from '@auth0/auth0-react';
+import './Navigation.css';
 
 const APP_NAME = 'MyStore';
 
-function Navigation({ cartItemCount, wishlistCount, onOpenCart, searchQuery, setSearchQuery }) {
+function Navigation({ cartItemCount, wishlistCount, onOpenCart, searchQuery, setSearchQuery, products = [] }) {
   const { loginWithRedirect, logout, user, isAuthenticated, isLoading, getAccessTokenSilently } = useAuth0();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [isAdmin, setIsAdmin]   = useState(false);
-  const menuRef  = useRef(null);
-  const navigate = useNavigate();
+  const [menuOpen, setMenuOpen]       = useState(false);
+  const [isAdmin, setIsAdmin]         = useState(false);
+  const [suggestions, setSuggestions] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const menuRef   = useRef(null);
+  const searchRef = useRef(null);
+  const navigate  = useNavigate();
 
   // ── Detect admin role from JWT ──────────────────────────────────────────────
   useEffect(() => {
@@ -31,10 +35,49 @@ function Navigation({ cartItemCount, wishlistCount, onOpenCart, searchQuery, set
       if (menuRef.current && !menuRef.current.contains(e.target)) {
         setMenuOpen(false);
       }
+      if (searchRef.current && !searchRef.current.contains(e.target)) {
+        setShowSuggestions(false);
+      }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
+
+  // ── Build suggestions from local product list ────────────────────────────────
+  const handleSearchChange = (value) => {
+    setSearchQuery(value);
+    const q = value.trim().toLowerCase();
+    if (q.length < 2) {
+      setSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
+    const matches = products
+      .filter(p =>
+        p.name.toLowerCase().includes(q) ||
+        p.category?.toLowerCase().includes(q) ||
+        p.description?.toLowerCase().includes(q)
+      )
+      .slice(0, 6);
+    setSuggestions(matches);
+    setShowSuggestions(matches.length > 0);
+  };
+
+  const handleSuggestionClick = (product) => {
+    setSearchQuery(product.name);
+    setShowSuggestions(false);
+    navigate('/products');
+  };
+
+  const handleSearchKeyDown = (e) => {
+    if (e.key === 'Escape') {
+      setShowSuggestions(false);
+    }
+    if (e.key === 'Enter') {
+      setShowSuggestions(false);
+      navigate('/products');
+    }
+  };
 
   const menuItem = (icon, label, onClick) => (
     <button
@@ -67,15 +110,87 @@ function Navigation({ cartItemCount, wishlistCount, onOpenCart, searchQuery, set
       </div>
 
       {/* Search */}
-      <div className="nav-center" style={{ flexGrow: 1, margin: '0 32px', maxWidth: '400px' }}>
+      <div className="nav-center" style={{ flexGrow: 1, margin: '0 32px', maxWidth: '400px', position: 'relative' }} ref={searchRef}>
         <input
           type="text"
           placeholder="Search products..."
           value={searchQuery || ''}
-          onChange={(e) => setSearchQuery(e.target.value)}
+          onChange={(e) => handleSearchChange(e.target.value)}
+          onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
+          onKeyDown={handleSearchKeyDown}
           className="search-input"
           style={{ width: '100%' }}
+          autoComplete="off"
         />
+
+        {/* Suggestions dropdown */}
+        {showSuggestions && (
+          <div style={{
+            position: 'absolute',
+            top: 'calc(100% + 6px)',
+            left: 0,
+            right: 0,
+            background: 'rgba(18,18,28,0.98)',
+            backdropFilter: 'blur(24px)',
+            border: '1px solid rgba(255,255,255,0.12)',
+            borderRadius: '12px',
+            boxShadow: '0 16px 48px rgba(0,0,0,0.5)',
+            zIndex: 200,
+            overflow: 'hidden',
+          }}>
+            {suggestions.map((product) => (
+              <div
+                key={product.id}
+                onClick={() => handleSuggestionClick(product)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  padding: '10px 14px',
+                  cursor: 'pointer',
+                  borderBottom: '1px solid rgba(255,255,255,0.05)',
+                  transition: 'background 0.12s',
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.07)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+              >
+                <img
+                  src={product.image_url || 'https://via.placeholder.com/36x36?text=?'}
+                  alt={product.name}
+                  style={{ width: '36px', height: '36px', objectFit: 'cover', borderRadius: '6px', flexShrink: 0 }}
+                />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ margin: 0, fontSize: '0.88rem', fontWeight: 500, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {product.name}
+                  </p>
+                  <p style={{ margin: '2px 0 0', fontSize: '0.75rem', color: 'rgba(255,255,255,0.45)' }}>
+                    {product.category} · ₹{product.price?.toLocaleString('en-IN')}
+                  </p>
+                </div>
+                {product.stock_quantity <= 0 && (
+                  <span style={{ fontSize: '0.7rem', color: '#ef4444', flexShrink: 0 }}>Out of stock</span>
+                )}
+              </div>
+            ))}
+
+            {/* "See all results" footer */}
+            <div
+              onClick={() => { setShowSuggestions(false); navigate('/products'); }}
+              style={{
+                padding: '10px 14px',
+                fontSize: '0.82rem',
+                color: '#60a5fa',
+                cursor: 'pointer',
+                textAlign: 'center',
+                fontWeight: 600,
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = 'rgba(59,130,246,0.08)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              See all results for "{searchQuery}"
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Nav links */}

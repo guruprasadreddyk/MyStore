@@ -1,5 +1,5 @@
 import React from 'react';
-import './Modals.css';
+import './Cart.css';
 
 const fmt = (n) => `₹${Number(n).toLocaleString('en-IN')}`;
 
@@ -34,7 +34,7 @@ function Cart({ cart, loading, addToCart, removeFromCart, onCheckout, cartTotal,
                     {/* Quantity controls */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0' }}>
                       <button
-                        onClick={() => removeFromCart(item.id)}
+                        onClick={() => removeFromCart(item.id, item.variant_id || null)}
                         disabled={loading}
                         style={{
                           width: '30px', height: '30px', border: '1px solid rgba(255,255,255,0.2)',

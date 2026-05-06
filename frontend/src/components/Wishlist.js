@@ -1,5 +1,6 @@
 import React from 'react';
 import ProductCard from './ProductCard';
+import './Wishlist.css';
 
 function Wishlist({ wishlist, toggleWishlist, addToCart, loading, onQuickView }) {
   return (

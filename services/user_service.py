@@ -6,20 +6,25 @@ user_service.py — handles all user-scoped data:
   - Profile       → user_data_table_guru (field: profile)
   - Auth0 actions → email verification, name sync via Management API
 """
-import json
-import boto3
-import time
-import os
-import uuid
-import urllib.request
-from decimal import Decimal
-from utils import convert_decimal, response, get_user_id
 
-dynamodb       = boto3.resource('dynamodb')
-cart_table     = dynamodb.Table('cart_table_guru')
-wishlist_table = dynamodb.Table('wishlist_table_guru')
-product_table  = dynamodb.Table('products_table_guru')
-user_data_table= dynamodb.Table('user_data_table_guru')
+import json
+import uuid
+import os
+import time
+import urllib.request
+import boto3
+from utils import response, send_email_via_resend
+from validation import validate
+
+# Lazy-load tables for testability
+def get_cart_table():
+    return boto3.resource("dynamodb").Table('cart_table_guru')
+
+def get_wishlist_table():
+    return boto3.resource("dynamodb").Table('wishlist_table_guru')
+
+def get_user_data_table():
+    return boto3.resource("dynamodb").Table('user_data_table_guru')
 
 CART_TTL_SECONDS = 7 * 24 * 60 * 60
 
@@ -83,25 +88,18 @@ def update_auth0_name(user_id, name):
 
 # ─── Product fetch ────────────────────────────────────────────────────────────
 
-def fetch_product(product_id):
-    try:
-        result = product_table.get_item(Key={"id": str(product_id)})
-        item   = result.get("Item")
-        return convert_decimal(item) if item else None
-    except Exception as e:
-        print("ERROR fetching product:", str(e))
-        return None
+from utils import fetch_product, convert_decimal, get_user_id
 
 
 # ─── Cart helpers ─────────────────────────────────────────────────────────────
 
 def get_cart(user_id):
-    res = cart_table.get_item(Key={"user_id": user_id})
+    res = get_cart_table().get_item(Key={"user_id": user_id})
     return res.get("Item", {}).get("cart", [])
 
 
 def save_cart(user_id, cart):
-    cart_table.put_item(Item={
+    get_cart_table().put_item(Item={
         "user_id": user_id,
         "cart":    cart,
         "ttl":     int(time.time()) + CART_TTL_SECONDS
@@ -111,23 +109,23 @@ def save_cart(user_id, cart):
 # ─── Wishlist helpers ─────────────────────────────────────────────────────────
 
 def get_wishlist(user_id):
-    res = wishlist_table.get_item(Key={"user_id": user_id})
+    res = get_wishlist_table().get_item(Key={"user_id": user_id})
     return res.get("Item", {}).get("wishlist", [])
 
 
 def save_wishlist(user_id, wishlist):
-    wishlist_table.put_item(Item={"user_id": user_id, "wishlist": wishlist})
+    get_wishlist_table().put_item(Item={"user_id": user_id, "wishlist": wishlist})
 
 
 # ─── Address helpers ──────────────────────────────────────────────────────────
 
 def get_addresses(user_id):
-    res = user_data_table.get_item(Key={"user_id": user_id})
+    res = get_user_data_table().get_item(Key={"user_id": user_id})
     return res.get("Item", {}).get("addresses", [])
 
 
 def save_addresses(user_id, addresses):
-    user_data_table.update_item(
+    get_user_data_table().update_item(
         Key={"user_id": user_id},
         UpdateExpression="SET addresses = :a",
         ExpressionAttributeValues={":a": addresses}
@@ -137,12 +135,12 @@ def save_addresses(user_id, addresses):
 # ─── Profile helpers ──────────────────────────────────────────────────────────
 
 def get_profile(user_id):
-    res = user_data_table.get_item(Key={"user_id": user_id})
+    res = get_user_data_table().get_item(Key={"user_id": user_id})
     return res.get("Item", {}).get("profile", {})
 
 
 def save_profile(user_id, profile):
-    user_data_table.update_item(
+    get_user_data_table().update_item(
         Key={"user_id": user_id},
         UpdateExpression="SET #p = :profile",
         ExpressionAttributeNames={"#p": "profile"},
@@ -170,11 +168,19 @@ def lambda_handler(event, context):
 
         if path == "/cart/add" and method == "POST":
             body = json.loads(event.get("body") or "{}")
-            extra = set(body.keys()) - {"id"}
+            
+            # Validate input
+            try:
+                validate(body, "add_to_cart")
+            except ValueError as e:
+                return response(400, message=str(e))
+            
+            extra = set(body.keys()) - {"id", "variant_id"}
             if extra:
-                return response(400, message=f"Unexpected fields: {list(extra)}. Only 'id' is allowed")
+                return response(400, message=f"Unexpected fields: {list(extra)}. Only 'id' and 'variant_id' are allowed")
 
             product_id = str(body.get("id", ""))
+            variant_id = body.get("variant_id")  # Optional
             if not product_id:
                 return response(400, message="Product ID required")
 
@@ -182,22 +188,45 @@ def lambda_handler(event, context):
             if not product:
                 return response(400, message="Invalid product")
 
-            current_stock = product.get("stock_quantity", 0)
-            if current_stock <= 0:
+            # If variant_id provided, validate it exists
+            if variant_id:
+                variants = product.get("variants", [])
+                variant = next((v for v in variants if v.get("variant_id") == variant_id), None)
+                if not variant:
+                    return response(400, message=f"Invalid variant: {variant_id}")
+                variant_price = variant.get("price", product["price"])
+                variant_stock = variant.get("stock", product.get("stock_quantity", 0))
+            else:
+                # No variant specified — use product defaults
+                variant_price = product["price"]
+                variant_stock = product.get("stock_quantity", 0)
+
+            if variant_stock <= 0:
                 return response(400, message="Product is out of stock")
 
             cart = get_cart(user_id)
-            qty_in_cart = sum(i.get("quantity", 1) for i in cart if str(i.get("id")) == product_id)
-            if qty_in_cart >= current_stock:
-                return response(400, message=f"Cannot add more. Only {current_stock} available in stock")
+            # Count items with same product_id AND variant_id (if specified)
+            qty_in_cart = sum(
+                i.get("quantity", 1) for i in cart 
+                if str(i.get("id")) == product_id and i.get("variant_id") == variant_id
+            )
+            if qty_in_cart >= variant_stock:
+                return response(400, message=f"Cannot add more. Only {variant_stock} available in stock")
 
             validated = {
                 "id":       product["id"],
                 "name":     product["name"],
-                "price":    product["price"],
+                "price":    variant_price,
                 "category": product.get("category", "General")
             }
-            existing = next((i for i in cart if str(i.get("id")) == str(validated["id"])), None)
+            if variant_id:
+                validated["variant_id"] = variant_id
+
+            # Find existing cart item with same product_id AND variant_id
+            existing = next(
+                (i for i in cart if str(i.get("id")) == str(validated["id"]) and i.get("variant_id") == variant_id),
+                None
+            )
             if existing:
                 existing["quantity"] += 1
             else:
@@ -208,15 +237,22 @@ def lambda_handler(event, context):
 
         if path.startswith("/cart/remove/") and method == "DELETE":
             item_id    = path.split("/")[-1]
+            # Optional variant_id from query string to distinguish variants
+            qp         = event.get("queryStringParameters") or {}
+            variant_id = qp.get("variant_id")
             cart       = get_cart(user_id)
             item_found = False
             for item in cart:
-                if str(item.get("id")) == str(item_id):
+                id_match      = str(item.get("id")) == str(item_id)
+                variant_match = item.get("variant_id") == variant_id  # both None = match
+                if id_match and variant_match:
                     item_found = True
                     if item.get("quantity", 1) > 1:
                         item["quantity"] -= 1
                     else:
-                        cart = [i for i in cart if str(i.get("id")) != str(item_id)]
+                        cart = [i for i in cart if not (
+                            str(i.get("id")) == str(item_id) and i.get("variant_id") == variant_id
+                        )]
                     break
             if not item_found:
                 return response(404, message="Item not found in cart")
@@ -272,14 +308,13 @@ def lambda_handler(event, context):
 
         if path == "/addresses" and method == "POST":
             body     = json.loads(event.get("body") or "{}")
-            required = ["full_name", "phone", "address_line1", "city", "state", "pincode"]
-            missing  = [f for f in required if not body.get(f, "").strip()]
-            if missing:
-                return response(400, message=f"Missing fields: {', '.join(missing)}")
-            if not body["phone"].strip().isdigit() or len(body["phone"].strip()) != 10:
-                return response(400, message="Phone must be a 10-digit number")
-            if not body["pincode"].strip().isdigit() or len(body["pincode"].strip()) != 6:
-                return response(400, message="PIN code must be a 6-digit number")
+            
+            # Validate input
+            try:
+                validate(body, "add_address")
+            except ValueError as e:
+                return response(400, message=str(e))
+            
             addresses   = get_addresses(user_id)
             new_address = {
                 "address_id":    str(uuid.uuid4()),
@@ -327,10 +362,15 @@ def lambda_handler(event, context):
 
         if path == "/profile/me" and method == "PUT":
             body    = json.loads(event.get("body") or "{}")
+            
+            # Validate input
+            try:
+                validate(body, "update_profile")
+            except ValueError as e:
+                return response(400, message=str(e))
+            
             allowed = {"display_name", "phone", "bio"}
             profile = {k: str(v).strip() for k, v in body.items() if k in allowed and str(v).strip()}
-            if "phone" in profile and (not profile["phone"].isdigit() or len(profile["phone"]) != 10):
-                return response(400, message="Phone must be a 10-digit number")
 
             save_profile(user_id, profile)
 

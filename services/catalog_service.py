@@ -1,21 +1,25 @@
 import json
+import uuid
 import boto3
 from decimal import Decimal
-from boto3.dynamodb.conditions import Attr
+from datetime import datetime
+from boto3.dynamodb.conditions import Attr, Key
 import os
 from utils import convert_decimal, response
 
-# ─── DynamoDB setup ───────────────────────────────────────────────────────────
-TABLE_NAME    = os.environ.get("PRODUCTS_TABLE", "products_table_guru")
-dynamodb      = boto3.resource("dynamodb")
-product_table = dynamodb.Table(TABLE_NAME)
+# ─── DynamoDB setup (lazy-loaded for testability) ────────────────────────────
+def get_product_table():
+    return boto3.resource("dynamodb").Table("products_table_guru")
+
+def get_reviews_table():
+    return boto3.resource("dynamodb").Table("reviews_table_guru")
 
 
 # ─── Product helpers ──────────────────────────────────────────────────────────
 
 def get_product_by_id(product_id):
     try:
-        result = product_table.get_item(Key={"id": str(product_id)})
+        result = get_product_table().get_item(Key={"id": str(product_id)})
         item   = result.get("Item")
         return convert_decimal(item) if item else None
     except Exception as e:
@@ -23,13 +27,40 @@ def get_product_by_id(product_id):
         return None
 
 
-def get_all_products(limit=8, last_key=None, min_price=None, max_price=None, category=None, sort_by=None):
+def get_product_variants(product_id):
+    """Get all variants for a product."""
+    try:
+        product = get_product_by_id(product_id)
+        if not product:
+            return None
+        return product.get("variants", [])
+    except Exception as e:
+        print(f"ERROR fetching variants: {str(e)}")
+        return None
+
+
+def get_variant(product_id, variant_id):
+    """Get specific variant by variant_id."""
+    try:
+        variants = get_product_variants(product_id)
+        if not variants:
+            return None
+        for variant in variants:
+            if variant.get("variant_id") == variant_id:
+                return variant
+        return None
+    except Exception as e:
+        print(f"ERROR fetching variant: {str(e)}")
+        return None
+
+
+def get_all_products(limit=10, last_key=None, min_price=None, max_price=None, category=None, sort_by=None):
     try:
         scan_kwargs = {"Limit": limit}
         if last_key:
             scan_kwargs["ExclusiveStartKey"] = last_key
 
-        result = product_table.scan(**scan_kwargs)
+        result = get_product_table().scan(**scan_kwargs)
         items  = result.get("Items", [])
 
         # Client-side filters (applied after DynamoDB page)
@@ -70,7 +101,7 @@ def get_product_recommendations(product_ids, limit=5):
 
         avg_price /= len(selected)
 
-        all_items = product_table.scan().get("Items", [])
+        all_items = get_product_table().scan().get("Items", [])
         recs = []
         for p in all_items:
             if p.get("id") not in product_ids:
@@ -95,51 +126,277 @@ def get_product_recommendations(product_ids, limit=5):
 
 # ─── Search helpers ───────────────────────────────────────────────────────────
 
-def search_products(query, min_price=None, max_price=None, category=None, last_key=None, limit=20):
+def search_products(query, min_price=None, max_price=None, category=None, brand=None, min_rating=None, in_stock_only=False, last_key=None, limit=20):
     """
-    Price/category filtered server-side via DynamoDB FilterExpression.
-    Text matching done in Python for case-insensitivity (DynamoDB contains() is case-sensitive).
+    Enhanced search with filters:
+    - Uses category-price-index GSI for efficient category queries
+    - Supports brand, rating, and stock availability filters
+    - Text matching done in Python for case-insensitivity
     """
     try:
-        query_lower   = query.lower()
-        server_filter = None
-
-        if min_price is not None:
-            server_filter = Attr("price").gte(Decimal(str(min_price)))
-        if max_price is not None:
-            max_f         = Attr("price").lte(Decimal(str(max_price)))
-            server_filter = server_filter & max_f if server_filter else max_f
+        query_lower = query.lower()
+        results = []
+        
+        # If category specified, use GSI for efficient query
         if category and category != "All":
-            cat_f         = Attr("category").eq(category)
-            server_filter = server_filter & cat_f if server_filter else cat_f
-
-        scan_kwargs = {}
-        if server_filter:
-            scan_kwargs["FilterExpression"] = server_filter
-        if last_key:
-            scan_kwargs["ExclusiveStartKey"] = last_key
-
-        results, last_evaluated_key = [], None
-        while True:
-            page  = product_table.scan(**scan_kwargs)
+            query_kwargs = {
+                "IndexName": "category-price-index",
+                "KeyConditionExpression": Key("category").eq(category)
+            }
+            
+            # Add price range to key condition if specified
+            if min_price is not None and max_price is not None:
+                query_kwargs["KeyConditionExpression"] = Key("category").eq(category) & Key("price").between(
+                    Decimal(str(min_price)), Decimal(str(max_price))
+                )
+            elif min_price is not None:
+                query_kwargs["KeyConditionExpression"] = Key("category").eq(category) & Key("price").gte(Decimal(str(min_price)))
+            elif max_price is not None:
+                query_kwargs["KeyConditionExpression"] = Key("category").eq(category) & Key("price").lte(Decimal(str(max_price)))
+            
+            if last_key:
+                query_kwargs["ExclusiveStartKey"] = last_key
+            
+            page = get_product_table().query(**query_kwargs)
             items = page.get("Items", [])
-
-            for item in items:
-                if query_lower in item.get("name", "").lower() or \
-                   query_lower in item.get("description", "").lower():
-                    results.append(convert_decimal(item))
-                    if len(results) >= limit:
-                        break
-
             last_evaluated_key = page.get("LastEvaluatedKey")
-            if len(results) >= limit or not last_evaluated_key:
+        else:
+            # No category filter - use scan with filters
+            scan_kwargs = {}
+            server_filter = None
+            
+            if min_price is not None:
+                server_filter = Attr("price").gte(Decimal(str(min_price)))
+            if max_price is not None:
+                max_f = Attr("price").lte(Decimal(str(max_price)))
+                server_filter = server_filter & max_f if server_filter else max_f
+            
+            if server_filter:
+                scan_kwargs["FilterExpression"] = server_filter
+            if last_key:
+                scan_kwargs["ExclusiveStartKey"] = last_key
+            
+            page = get_product_table().scan(**scan_kwargs)
+            items = page.get("Items", [])
+            last_evaluated_key = page.get("LastEvaluatedKey")
+        
+        # Apply client-side filters
+        for item in items:
+            # Text search filter
+            if query_lower and query_lower not in item.get("name", "").lower() and \
+               query_lower not in item.get("description", "").lower():
+                continue
+            
+            # Brand filter
+            if brand and item.get("brand", "").lower() != brand.lower():
+                continue
+            
+            # Rating filter
+            if min_rating is not None:
+                item_rating = float(item.get("rating", 0))
+                if item_rating < float(min_rating):
+                    continue
+            
+            # Stock availability filter
+            if in_stock_only:
+                stock = int(item.get("stock_quantity", 0))
+                if stock <= 0:
+                    continue
+            
+            results.append(convert_decimal(item))
+            if len(results) >= limit:
                 break
-            scan_kwargs["ExclusiveStartKey"] = last_evaluated_key
-
-        return {"items": results, "lastEvaluatedKey": last_evaluated_key, "total": len(results)}
+        
+        return {
+            "items": results,
+            "lastEvaluatedKey": last_evaluated_key,
+            "total": len(results)
+        }
+        
     except Exception as e:
         print(f"ERROR searching products: {str(e)}")
         return {"items": [], "lastEvaluatedKey": None, "total": 0}
+
+
+# ─── Reviews helpers ──────────────────────────────────────────────────────────
+
+def get_reviews_for_product(product_id, limit=20, last_key=None):
+    """Get all reviews for a product, sorted by newest first."""
+    try:
+        kwargs = {
+            "IndexName": "product_id-index",
+            "KeyConditionExpression": Key("product_id").eq(str(product_id)),
+            "Limit": limit,
+            "ScanIndexForward": False  # Descending order (newest first)
+        }
+        if last_key:
+            kwargs["ExclusiveStartKey"] = last_key
+        
+        result = get_reviews_table().query(**kwargs)
+        return {
+            "reviews": convert_decimal(result.get("Items", [])),
+            "lastEvaluatedKey": result.get("LastEvaluatedKey")
+        }
+    except Exception as e:
+        print(f"ERROR getting reviews: {str(e)}")
+        return {"reviews": [], "lastEvaluatedKey": None}
+
+
+def get_user_review_for_product(user_id, product_id):
+    """Check if user already reviewed this product."""
+    try:
+        result = get_reviews_table().query(
+            IndexName="user_id-index",
+            KeyConditionExpression=Key("user_id").eq(user_id)
+        )
+        reviews = result.get("Items", [])
+        for review in reviews:
+            if review.get("product_id") == str(product_id):
+                return convert_decimal(review)
+        return None
+    except Exception as e:
+        print(f"ERROR checking user review: {str(e)}")
+        return None
+
+
+def has_user_ordered_product(user_id, product_id):
+    """Check if user has ordered and received this product."""
+    try:
+        orders_table = boto3.resource("dynamodb").Table("orders_table_guru")
+        
+        # Query orders by user_id
+        result = orders_table.query(
+            IndexName="user_id-index",
+            KeyConditionExpression=Key("user_id").eq(user_id)
+        )
+        
+        orders = result.get("Items", [])
+        
+        # Check if any order contains this product and is delivered
+        for order in orders:
+            # Only allow reviews for delivered orders
+            if order.get("status") in ["delivered", "shipped"]:
+                items = order.get("items", [])
+                for item in items:
+                    if str(item.get("id")) == str(product_id):
+                        return True
+        
+        return False
+    except Exception as e:
+        print(f"ERROR checking user orders: {str(e)}")
+        return False
+
+
+def create_review(user_id, user_email, product_id, rating, title, comment):
+    """Create a new review and update product rating."""
+    try:
+        # Check if user has ordered this product
+        if not has_user_ordered_product(user_id, product_id):
+            return None, "You can only review products you have ordered and received"
+        
+        # Check if user already reviewed this product
+        existing = get_user_review_for_product(user_id, product_id)
+        if existing:
+            return None, "You have already reviewed this product"
+        
+        # Validate rating
+        if not (1 <= rating <= 5):
+            return None, "Rating must be between 1 and 5"
+        
+        # Create review
+        review = {
+            "review_id": str(uuid.uuid4()),
+            "product_id": str(product_id),
+            "user_id": user_id,
+            "user_email": user_email,
+            "rating": rating,
+            "title": title,
+            "comment": comment,
+            "helpful_count": 0,
+            "created_at": datetime.utcnow().isoformat() + "Z"
+        }
+        
+        get_reviews_table().put_item(Item=review)
+        
+        # Update product rating
+        update_product_rating(product_id)
+        
+        return convert_decimal(review), None
+    except Exception as e:
+        print(f"ERROR creating review: {str(e)}")
+        return None, str(e)
+
+
+def update_product_rating(product_id):
+    """Recalculate product rating from all reviews."""
+    try:
+        # Get all reviews for this product
+        result = get_reviews_table().query(
+            IndexName="product_id-index",
+            KeyConditionExpression=Key("product_id").eq(str(product_id))
+        )
+        reviews = result.get("Items", [])
+        
+        if not reviews:
+            return
+        
+        # Calculate average rating
+        total_rating = sum(float(r.get("rating", 0)) for r in reviews)
+        avg_rating = round(total_rating / len(reviews), 1)
+        
+        # Update product
+        get_product_table().update_item(
+            Key={"id": str(product_id)},
+            UpdateExpression="SET rating = :rating, review_count = :count",
+            ExpressionAttributeValues={
+                ":rating": Decimal(str(avg_rating)),
+                ":count": len(reviews)
+            }
+        )
+        print(f"INFO: Updated product {product_id} rating to {avg_rating} ({len(reviews)} reviews)")
+    except Exception as e:
+        print(f"ERROR updating product rating: {str(e)}")
+
+
+def mark_review_helpful(review_id):
+    """Increment helpful count for a review."""
+    try:
+        get_reviews_table().update_item(
+            Key={"review_id": review_id},
+            UpdateExpression="SET helpful_count = helpful_count + :inc",
+            ExpressionAttributeValues={":inc": 1}
+        )
+        return True
+    except Exception as e:
+        print(f"ERROR marking review helpful: {str(e)}")
+        return False
+
+
+def delete_review(review_id, user_id):
+    """Delete a review (only by the author)."""
+    try:
+        # Get review to verify ownership and get product_id
+        result = get_reviews_table().get_item(Key={"review_id": review_id})
+        review = result.get("Item")
+        
+        if not review:
+            return False, "Review not found"
+        
+        if review.get("user_id") != user_id:
+            return False, "Not authorized to delete this review"
+        
+        product_id = review.get("product_id")
+        
+        # Delete review
+        get_reviews_table().delete_item(Key={"review_id": review_id})
+        
+        # Update product rating
+        update_product_rating(product_id)
+        
+        return True, None
+    except Exception as e:
+        print(f"ERROR deleting review: {str(e)}")
+        return False, str(e)
 
 
 # ─── Lambda handler ───────────────────────────────────────────────────────────
@@ -153,6 +410,17 @@ def lambda_handler(event, context):
         if path.startswith("/v1/"):
             path = path[3:]
 
+        # Get user info from JWT (for authenticated routes)
+        user_id = None
+        user_email = None
+        try:
+            claims = event.get("requestContext", {}).get("authorizer", {}).get("jwt", {}).get("claims", {})
+            user_id = claims.get("sub")
+            # Check namespaced claim first (set by Auth0 Action), fall back to standard claim
+            user_email = claims.get("https://mystore.com/email") or claims.get("email")
+        except Exception:
+            pass
+
         print(f"INFO: Path={path}, Method={method}")
 
         # ── Health check ──────────────────────────────────────────────────────
@@ -162,7 +430,7 @@ def lambda_handler(event, context):
         # ── GET /products ─────────────────────────────────────────────────────
         if path == "/products" and method == "GET":
             qp       = event.get("queryStringParameters") or {}
-            limit    = int(qp.get("limit", 8))
+            limit    = int(qp.get("limit", 10))
             last_key = None
             if qp.get("lastEvaluatedKey"):
                 try:
@@ -180,7 +448,7 @@ def lambda_handler(event, context):
             return response(200, data=result)
 
         # ── GET /products/{id} ────────────────────────────────────────────────
-        if path.startswith("/products/") and method == "GET":
+        if path.startswith("/products/") and method == "GET" and "/reviews" not in path and "/variants" not in path:
             product_id = path.split("/")[-1]
             if not product_id:
                 return response(400, message="Product ID is required")
@@ -188,6 +456,87 @@ def lambda_handler(event, context):
             if not product:
                 return response(404, message="Product not found.")
             return response(200, data=product)
+
+        # ── GET /products/{id}/variants ───────────────────────────────────────
+        if path.startswith("/products/") and "/variants" in path and method == "GET":
+            parts = path.split("/")
+            if len(parts) >= 4 and parts[3] == "variants":
+                product_id = parts[2]
+                if len(parts) == 4:
+                    # GET /products/{id}/variants
+                    variants = get_product_variants(product_id)
+                    if variants is None:
+                        return response(404, message="Product not found")
+                    return response(200, data=variants)
+                elif len(parts) == 5:
+                    # GET /products/{id}/variants/{variant_id}
+                    variant_id = parts[4]
+                    variant = get_variant(product_id, variant_id)
+                    if not variant:
+                        return response(404, message="Variant not found")
+                    return response(200, data=variant)
+
+        # ── GET /products/{id}/reviews ────────────────────────────────────────
+        if path.startswith("/products/") and path.endswith("/reviews") and method == "GET":
+            product_id = path.split("/")[2]
+            qp = event.get("queryStringParameters") or {}
+            limit = int(qp.get("limit", 20))
+            last_key = None
+            if qp.get("lastEvaluatedKey"):
+                try:
+                    last_key = json.loads(qp["lastEvaluatedKey"])
+                except Exception:
+                    pass
+            result = get_reviews_for_product(product_id, limit, last_key)
+            return response(200, data=result)
+
+        # ── POST /products/{id}/reviews ───────────────────────────────────────
+        if path.startswith("/products/") and path.endswith("/reviews") and method == "POST":
+            if not user_id:
+                return response(401, message="Authentication required")
+            
+            product_id = path.split("/")[2]
+            body = json.loads(event.get("body") or "{}")
+            
+            rating = body.get("rating")
+            title = body.get("title", "")
+            comment = body.get("comment", "")
+            
+            if not rating:
+                return response(400, message="Rating is required")
+            if not comment:
+                return response(400, message="Comment is required")
+            
+            try:
+                rating = int(rating)
+            except (TypeError, ValueError):
+                return response(400, message="Rating must be a number")
+            
+            review, error = create_review(user_id, user_email, product_id, rating, title, comment)
+            if error:
+                return response(400, message=error)
+            
+            return response(200, data=review, message="Review submitted successfully")
+
+        # ── PUT /reviews/{id}/helpful ─────────────────────────────────────────
+        if path.startswith("/reviews/") and path.endswith("/helpful") and method == "PUT":
+            review_id = path.split("/")[2]
+            success = mark_review_helpful(review_id)
+            if success:
+                return response(200, message="Marked as helpful")
+            return response(500, message="Failed to mark as helpful")
+
+        # ── DELETE /reviews/{id} ──────────────────────────────────────────────
+        if path.startswith("/reviews/") and method == "DELETE":
+            if not user_id:
+                return response(401, message="Authentication required")
+            
+            review_id = path.split("/")[2]
+            success, error = delete_review(review_id, user_id)
+            if error:
+                return response(400, message=error)
+            
+            return response(200, message="Review deleted successfully")
 
         # ── GET /recommendations ──────────────────────────────────────────────
         if path == "/recommendations" and method == "GET":
@@ -212,6 +561,9 @@ def lambda_handler(event, context):
             min_price = Decimal(str(qp["minPrice"])) if qp.get("minPrice") else None
             max_price = Decimal(str(qp["maxPrice"])) if qp.get("maxPrice") else None
             category  = qp.get("category")
+            brand     = qp.get("brand")
+            min_rating = float(qp["minRating"]) if qp.get("minRating") else None
+            in_stock_only = qp.get("inStockOnly", "").lower() == "true"
             limit     = int(qp.get("limit", 20))
             last_key  = None
             if qp.get("lastEvaluatedKey"):
@@ -220,7 +572,7 @@ def lambda_handler(event, context):
                 except Exception:
                     pass
 
-            result = search_products(query, min_price, max_price, category, last_key, limit)
+            result = search_products(query, min_price, max_price, category, brand, min_rating, in_stock_only, last_key, limit)
             return response(200, data=result)
 
         return response(404, message="Route not found")

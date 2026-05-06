@@ -1,6 +1,22 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth0 } from '@auth0/auth0-react';
-import { fetchAddresses, getHeaders } from '../services/api';
+import { fetchAddresses, getHeaders, createRazorpayOrder, processPayment, apiFetch } from '../services/api';
+
+// Load Razorpay script dynamically
+const loadRazorpayScript = () => {
+  return new Promise((resolve) => {
+    if (window.Razorpay) {
+      resolve(true);
+      return;
+    }
+    
+    const script = document.createElement('script');
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
+  });
+};
 
 const INDIAN_STATES = [
   'Andhra Pradesh','Arunachal Pradesh','Assam','Bihar','Chhattisgarh',
@@ -14,7 +30,7 @@ const INDIAN_STATES = [
 
 const EMPTY = { full_name: '', phone: '', address_line1: '', address_line2: '', city: '', state: '', pincode: '' };
 
-function Checkout({ cart, onConfirm, onCancel, loading }) {
+function Checkout({ cart, onConfirm, onCancel, loading, addToast }) {
   const { isAuthenticated, getAccessTokenSilently } = useAuth0();
   const [savedAddresses, setSavedAddresses] = useState([]);
   const [selectedId, setSelectedId]         = useState(null); // null = new address form
@@ -86,9 +102,100 @@ function Checkout({ cart, onConfirm, onCancel, loading }) {
     return Object.keys(e).length === 0;
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!validate()) return;
-    onConfirm({ address, grandTotal });
+
+    try {
+      // Get auth headers once — reuse for both order creation and payment
+      // to avoid a second getAccessTokenSilently() call that Edge may block
+      const headers = await getHeaders(isAuthenticated, getAccessTokenSilently);
+      const items = cart.map((item) => ({ id: item.id }));
+
+      const orderRes = await apiFetch('/order', {
+        method: 'POST',
+        headers,
+        body: { items, address },
+      });
+
+      if (orderRes.status === 'success' && orderRes.data) {
+        setTimeout(() => handlePayment(orderRes.data.order_id, headers), 500);
+      } else {
+        addToast(orderRes.message || 'Failed to create order', 'error');
+      }
+    } catch (error) {
+      console.error('Order creation error:', error);
+      addToast('Failed to create order. Please try again.', 'error');
+    }
+  };
+
+  const handlePayment = async (orderId, headers) => {
+    try {
+      const scriptLoaded = await loadRazorpayScript();
+      if (!scriptLoaded) {
+        addToast('Failed to load payment gateway. Please refresh and try again.', 'error');
+        return;
+      }
+
+      // Step 1: Create Razorpay order
+      const rzpOrderRes = await createRazorpayOrder(orderId, headers);
+
+      if (rzpOrderRes.status !== 'success' || !rzpOrderRes.data) {
+        addToast(rzpOrderRes.message || 'Failed to initiate payment. Please try again.', 'error');
+        return;
+      }
+
+      const { razorpay_key_id, razorpay_order_id, amount, mode } = rzpOrderRes.data;
+
+      // Step 2: If Razorpay is configured, open Razorpay checkout
+      if (mode === 'razorpay' && razorpay_key_id && razorpay_order_id) {
+        const options = {
+          key: razorpay_key_id,
+          amount: amount,
+          currency: 'INR',
+          order_id: razorpay_order_id,
+          handler: async (response) => {
+            // Step 3: Verify payment — get a fresh token here since Razorpay
+            // modal may take time and the original headers could be stale
+            const freshHeaders = await getHeaders(isAuthenticated, getAccessTokenSilently);
+            const verifyRes = await processPayment(
+              orderId,
+              amount / 100,
+              freshHeaders,
+              {
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+              }
+            );
+
+            if (verifyRes.status === 'success') {
+              onConfirm({ address, grandTotal, paymentComplete: true });
+            } else {
+              addToast('Payment verification failed. Please contact support.', 'error');
+            }
+          },
+          prefill: {
+            name: address.full_name,
+            contact: address.phone,
+          },
+          theme: { color: '#3b82f6' },
+        };
+
+        const rzp = new window.Razorpay(options);
+        rzp.open();
+      } else {
+        // Simulation mode — use the same headers
+        const verifyRes = await processPayment(orderId, amount / 100, headers);
+        if (verifyRes.status === 'success') {
+          onConfirm({ address, grandTotal, paymentComplete: true });
+        } else {
+          addToast(verifyRes.message || 'Payment failed. Please try again.', 'error');
+        }
+      }
+    } catch (error) {
+      console.error('Payment error:', error);
+      addToast('Payment failed. Please try again.', 'error');
+    }
   };
 
   const field = (key, label, placeholder, type = 'text') => (

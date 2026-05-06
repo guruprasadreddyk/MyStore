@@ -1,39 +1,29 @@
 import json
-import os
 import uuid
 import boto3
 from decimal import Decimal
+from datetime import datetime
 from botocore.exceptions import ClientError
-from utils import convert_decimal, response, get_user_id, get_user_email
+from utils import convert_decimal, response, get_user_id, get_user_email, send_email_via_resend, fetch_product, publish_sns_notification
+from validation import validate
 
+# Lazy-load tables for testability
+def get_orders_table():
+    return boto3.resource("dynamodb").Table("orders_table_guru")
 
-dynamodb = boto3.resource("dynamodb")
-sqs = boto3.client("sqs")
-sns = boto3.client("sns")
-sts = boto3.client("sts")
-orders_table  = dynamodb.Table("orders_table_guru")
-product_table = dynamodb.Table("products_table_guru")
-cart_table    = dynamodb.Table("cart_table_guru")
-cart_table = dynamodb.Table("cart_table_guru")
+def get_cart_table():
+    return boto3.resource("dynamodb").Table("cart_table_guru")
 
+def get_product_table():
+    return boto3.resource("dynamodb").Table("products_table_guru")
 
-
-
-
-# 🔹 Fetch product from DynamoDB
-def fetch_product(product_id):
-    try:
-        result = product_table.get_item(Key={"id": str(product_id)})
-        item = result.get("Item")
-        return convert_decimal(item) if item else None
-    except Exception as e:
-        print("ERROR fetching product:", str(e))
-        return None
+def get_returns_table():
+    return boto3.resource("dynamodb").Table("returns_table_guru")
 
 
 def fetch_cart(user_id):
     try:
-        result = cart_table.get_item(Key={"user_id": user_id})
+        result = get_cart_table().get_item(Key={"user_id": user_id})
         return convert_decimal(result.get("Item", {}).get("cart", []))
     except Exception as e:
         print("ERROR fetching cart:", str(e))
@@ -46,23 +36,28 @@ def aggregate_items(items):
 
     for item in items:
         item_id = str(item["id"])
+        variant_id = item.get("variant_id")
+        key = (item_id, variant_id)
 
-        if item_id in item_map:
-            item_map[item_id]["quantity"] += 1
+        if key in item_map:
+            item_map[key]["quantity"] += 1
         else:
-            item_map[item_id] = {
+            entry = {
                 "id": item["id"],
                 "name": item["name"],
                 "price": item["price"],
                 "quantity": 1
             }
+            if variant_id:
+                entry["variant_id"] = variant_id
+            item_map[key] = entry
 
     return list(item_map.values())
 
 
 def clear_cart(user_id):
     try:
-        cart_table.put_item(Item={
+        get_cart_table().put_item(Item={
             "user_id": user_id,
             "cart": []
         })
@@ -72,7 +67,7 @@ def clear_cart(user_id):
 
 def save_order(order):
     try:
-        orders_table.put_item(Item=order)
+        get_orders_table().put_item(Item=order)
     except Exception as e:
         print(f"ERROR saving order: {str(e)}")
 
@@ -87,7 +82,7 @@ def reserve_inventory(items):
         product_id = str(item["id"])
         quantity = item.get("quantity", 1)
         try:
-            product_table.update_item(
+            get_product_table().update_item(
                 Key={"id": product_id},
                 UpdateExpression="SET stock_quantity = stock_quantity - :qty",
                 ConditionExpression="stock_quantity >= :qty",
@@ -113,7 +108,7 @@ def _rollback_inventory(reserved_items):
         product_id = str(item["id"])
         quantity = item.get("quantity", 1)
         try:
-            product_table.update_item(
+            get_product_table().update_item(
                 Key={"id": product_id},
                 UpdateExpression="SET stock_quantity = stock_quantity + :qty",
                 ExpressionAttributeValues={":qty": quantity}
@@ -123,48 +118,201 @@ def _rollback_inventory(reserved_items):
             print(f"ERROR: Failed to rollback inventory for {product_id}: {str(e)}")
 
 
-def send_order_to_queue(order):
-    try:
-        queue_name = os.environ.get('SQS_QUEUE_NAME', 'order-processing-queue-guru')
-        response = sqs.get_queue_url(QueueName=queue_name)
-        queue_url = response['QueueUrl']
-        
-        sqs.send_message(
-            QueueUrl=queue_url,
-            MessageBody=json.dumps(order)
-        )
-        print(f"INFO: Order {order['order_id']} sent to SQS")
-    except Exception as e:
-        print(f"ERROR sending to SQS: {str(e)}")
-
-
 def publish_order_notification(order):
+    customer_email = order.get('user_email', '')
+    name           = order.get('address', {}).get('full_name', 'there')
+    city           = order.get('address', {}).get('city', '')
+    grand_total    = int(order.get('grand_total', 0))
+    order_ref      = order['order_id'][:8].upper()
+
+    # SNS (admin notification)
+    publish_sns_notification(
+        subject=f"Order Confirmed: #{order_ref}",
+        message=f"Order #{order_ref} placed by {name} ({customer_email}). Total: ₹{grand_total:,}"
+    )
+
+    # Resend (customer email)
+    items_html = "".join(
+        f"<tr><td style='padding:6px 0;border-bottom:1px solid #eee'>{i['name']}</td>"
+        f"<td style='padding:6px 0;border-bottom:1px solid #eee;text-align:right'>×{i['quantity']}</td>"
+        f"<td style='padding:6px 0;border-bottom:1px solid #eee;text-align:right'>₹{int(i['price']) * int(i['quantity']):,}</td></tr>"
+        for i in order.get('items', [])
+    )
+    subtotal        = int(order.get('subtotal', 0))
+    delivery_charge = int(order.get('delivery_charge', 0))
+    gst             = int(order.get('gst', 0))
+    send_email_via_resend(
+        to_email  = customer_email,
+        subject   = f"Order Confirmed — #{order_ref} | MyStore",
+        html_body = f"""<div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#333">
+<h2 style="color:#10b981">🛒 Order Confirmed!</h2>
+<p>Hi <strong>{name}</strong>, thank you for your order.</p>
+<p>Order Reference: <strong>#{order_ref}</strong></p>
+<table style="width:100%;border-collapse:collapse;margin:16px 0">
+  <thead><tr style="border-bottom:2px solid #eee">
+    <th style="text-align:left;padding:8px 0">Item</th>
+    <th style="text-align:right;padding:8px 0">Qty</th>
+    <th style="text-align:right;padding:8px 0">Amount</th>
+  </tr></thead>
+  <tbody>{items_html}</tbody>
+  <tfoot>
+    <tr><td colspan="2" style="padding:8px 0;border-top:1px solid #eee">Subtotal</td><td style="text-align:right;padding:8px 0;border-top:1px solid #eee">₹{subtotal:,}</td></tr>
+    <tr><td colspan="2" style="padding:4px 0">Delivery</td><td style="text-align:right;padding:4px 0">{'FREE' if delivery_charge == 0 else f'₹{delivery_charge:,}'}</td></tr>
+    <tr><td colspan="2" style="padding:4px 0">GST (18%)</td><td style="text-align:right;padding:4px 0">₹{gst:,}</td></tr>
+    <tr style="font-weight:bold"><td colspan="2" style="padding:8px 0;border-top:2px solid #eee">Grand Total</td><td style="text-align:right;padding:8px 0;border-top:2px solid #eee">₹{grand_total:,}</td></tr>
+  </tfoot>
+</table>
+<p>Delivering to <strong>{city}</strong>. Please complete payment to confirm your order.</p>
+<hr style="border:none;border-top:1px solid #eee;margin:24px 0"/>
+<p style="font-size:0.8rem;color:#999">MyStore · This is an automated email.</p>
+</div>""",
+        text_body = f"Hi {name}, your order #{order_ref} is confirmed. Total: ₹{grand_total:,}. Please pay to confirm."
+    )
+
+
+# ── Return Management ─────────────────────────────────────────────────────────
+
+def create_return_request(order_id, user_id, reason):
+    """Create a return request for a delivered order."""
     try:
-        account_id = sts.get_caller_identity()['Account']
-        region     = os.environ.get("AWS_REGION_NAME", "ap-southeast-1")
-        topic_name = os.environ.get("SNS_TOPIC_NAME", "order-notifications-guru")
-        topic_arn  = f"arn:aws:sns:{region}:{account_id}:{topic_name}"
-
-        subject = f"Order Confirmed: #{order['order_id'][:8].upper()}"
-        message = (
-            f"Hi {order.get('address', {}).get('full_name', 'there')},\n\n"
-            f"Your order #{order['order_id'][:8].upper()} has been placed successfully.\n"
-            f"Items: {len(order['items'])}\n"
-            f"Grand Total: ₹{order.get('grand_total', 0):,}\n"
-            f"Delivery to: {order.get('address', {}).get('city', '')}, "
-            f"{order.get('address', {}).get('state', '')}\n"
-            f"Customer: {order.get('user_email', '')}"
+        order = get_order_by_id(order_id)
+        if not order:
+            return None, "Order not found"
+        
+        if order.get("user_id") != user_id:
+            return None, "Not authorized to return this order"
+        
+        if order.get("status") != "delivered":
+            return None, f"Can only return delivered orders. Current status: {order.get('status')}"
+        
+        return_request = {
+            "return_id": str(uuid.uuid4()),
+            "order_id": order_id,
+            "user_id": user_id,
+            "reason": reason,
+            "status": "pending",
+            "created_at": datetime.utcnow().isoformat() + "Z",
+            "refund_amount": int(order.get("grand_total", 0)),
+            "refund_status": "pending"
+        }
+        
+        # Store return request in a returns table
+        get_returns_table().put_item(Item=return_request)
+        
+        # Update order status to show return is pending
+        order["status"] = "return_pending"
+        order["return_id"] = return_request["return_id"]
+        save_order(order)
+        
+        # Notify customer
+        send_email_via_resend(
+            to_email=order.get("user_email", ""),
+            subject=f"Return Request Received — #{order_id[:8].upper()} | MyStore",
+            html_body=f"""<div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
+<h2 style="color:#3b82f6">📦 Return Request Received</h2>
+<p>Hi {order.get('address', {}).get('full_name', 'there')},</p>
+<p>We've received your return request for order <strong>#{order_id[:8].upper()}</strong>.</p>
+<p><strong>Reason:</strong> {reason}</p>
+<p><strong>Refund Amount:</strong> ₹{return_request['refund_amount']:,}</p>
+<p>We'll review your request and send you a return label within 24 hours.</p>
+<hr style="border:none;border-top:1px solid #eee;margin:24px 0"/>
+<p style="font-size:0.8rem;color:#999">MyStore · This is an automated email.</p>
+</div>""",
+            text_body=f"Return request received for order #{order_id[:8].upper()}. Reason: {reason}. Refund amount: ₹{return_request['refund_amount']:,}"
         )
-
-        sns.publish(TopicArn=topic_arn, Subject=subject, Message=message)
-        print(f"INFO: Order notification sent for {order['order_id']}")
+        
+        return return_request, None
     except Exception as e:
-        print(f"ERROR publishing to SNS: {str(e)}")
+        print(f"ERROR creating return request: {str(e)}")
+        return None, str(e)
+
+
+def approve_return(return_id, user_id):
+    """Approve a return request."""
+    try:
+        result = get_returns_table().get_item(Key={"return_id": return_id})
+        return_req = result.get("Item")
+        
+        if not return_req:
+            return None, "Return request not found"
+        
+        if return_req.get("user_id") != user_id:
+            return None, "Not authorized"
+        
+        return_req["status"] = "approved"
+        return_req["approved_at"] = datetime.utcnow().isoformat() + "Z"
+        get_returns_table().put_item(Item=return_req)
+        
+        # Fetch order to get customer email
+        order = get_order_by_id(return_req.get("order_id", ""))
+        customer_email = order.get("user_email", "") if order else ""
+
+        # Send approval email
+        send_email_via_resend(
+            to_email=customer_email,
+            subject=f"Return Approved — #{return_id[:8].upper()} | MyStore",
+            html_body=f"""<div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
+<h2 style="color:#10b981">✅ Return Approved</h2>
+<p>Your return request has been approved.</p>
+<p>Please ship the item back to us using the return label.</p>
+<p>Once we receive and inspect the item, we'll process your refund of ₹{return_req['refund_amount']:,}.</p>
+</div>""",
+            text_body=f"Your return has been approved. Refund amount: ₹{return_req['refund_amount']:,}"
+        )
+        
+        return return_req, None
+    except Exception as e:
+        print(f"ERROR approving return: {str(e)}")
+        return None, str(e)
+
+
+def process_refund(return_id, user_id):
+    """Process refund for an approved return."""
+    try:
+        result = get_returns_table().get_item(Key={"return_id": return_id})
+        return_req = result.get("Item")
+        
+        if not return_req:
+            return None, "Return request not found"
+        
+        if return_req.get("status") != "approved":
+            return None, "Return must be approved before refunding"
+        
+        # In production, call Razorpay refund API here
+        # For now, just mark as refunded
+        return_req["status"] = "refunded"
+        return_req["refund_status"] = "completed"
+        return_req["refunded_at"] = datetime.utcnow().isoformat() + "Z"
+        get_returns_table().put_item(Item=return_req)
+        
+        # Update order status
+        order = get_order_by_id(return_req["order_id"])
+        if order:
+            order["status"] = "refunded"
+            save_order(order)
+        
+        # Send refund email
+        customer_email = order.get("user_email", "") if order else ""
+        send_email_via_resend(
+            to_email=customer_email,
+            subject=f"Refund Processed — #{return_id[:8].upper()} | MyStore",
+            html_body=f"""<div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
+<h2 style="color:#10b981">💰 Refund Processed</h2>
+<p>Your refund of ₹{return_req['refund_amount']:,} has been processed.</p>
+<p>The amount will appear in your account within 5-7 business days.</p>
+</div>""",
+            text_body=f"Refund of ₹{return_req['refund_amount']:,} has been processed. It will appear in your account within 5-7 business days."
+        )
+        
+        return return_req, None
+    except Exception as e:
+        print(f"ERROR processing refund: {str(e)}")
+        return None, str(e)
 
 
 def get_order_by_id(order_id):
     try:
-        result = orders_table.get_item(Key={"order_id": order_id})
+        result = get_orders_table().get_item(Key={"order_id": order_id})
         item = result.get("Item")
         return convert_decimal(item) if item else None
     except Exception as e:
@@ -176,7 +324,7 @@ def get_all_orders(user_id):
     """Query orders by user_id using the GSI — no full table scan."""
     try:
         from boto3.dynamodb.conditions import Key
-        result = orders_table.query(
+        result = get_orders_table().query(
             IndexName="user_id-index",
             KeyConditionExpression=Key("user_id").eq(user_id)
         )
@@ -209,22 +357,18 @@ def lambda_handler(event, context):
             body  = json.loads(event.get("body") or "{}")
             items = body.get("items", [])
 
+            # Validate input
+            try:
+                validate(body, "create_order")
+            except ValueError as e:
+                return response(400, message=str(e))
+
             # ── Address validation ────────────────────────────────────────────
             address = body.get("address", {})
             required_address_fields = ["full_name", "phone", "address_line1", "city", "state", "pincode"]
             missing = [f for f in required_address_fields if not address.get(f, "").strip()]
             if missing:
                 return response(400, message=f"Missing address fields: {', '.join(missing)}")
-
-            # Basic phone validation
-            phone = address["phone"].strip()
-            if not phone.isdigit() or len(phone) != 10:
-                return response(400, message="Phone must be a 10-digit number")
-
-            # Basic PIN code validation
-            pincode = address["pincode"].strip()
-            if not pincode.isdigit() or len(pincode) != 6:
-                return response(400, message="PIN code must be a 6-digit number")
 
             # ── Items validation ──────────────────────────────────────────────
             if not items or not isinstance(items, list):
@@ -245,10 +389,12 @@ def lambda_handler(event, context):
             validated_items = []
 
             for item in items:
-                if set(item.keys()) != {"id"}:
-                    return response(400, message="Each item must contain only 'id'")
+                allowed_keys = {"id", "variant_id"}
+                if not set(item.keys()).issubset(allowed_keys):
+                    return response(400, message=f"Each item must contain only 'id' and optionally 'variant_id'")
 
                 product_id = str(item.get("id"))
+                variant_id = item.get("variant_id")
 
                 if not product_id:
                     return response(400, message="Invalid product id")
@@ -269,11 +415,25 @@ def lambda_handler(event, context):
                 if not product:
                     return response(400, message=f"Invalid product id: {product_id}")
 
-                validated_items.append({
+                # If variant_id provided, get variant price; otherwise use product price
+                if variant_id:
+                    variants = product.get("variants", [])
+                    variant = next((v for v in variants if v.get("variant_id") == variant_id), None)
+                    if not variant:
+                        return response(400, message=f"Invalid variant: {variant_id}")
+                    item_price = variant.get("price", product["price"])
+                else:
+                    item_price = product["price"]
+
+                validated_item = {
                     "id": product["id"],
                     "name": product["name"],
-                    "price": product["price"]
-                })
+                    "price": int(item_price)
+                }
+                if variant_id:
+                    validated_item["variant_id"] = variant_id
+                
+                validated_items.append(validated_item)
 
             # ✅ aggregate duplicates → quantity
             processed_items = aggregate_items(validated_items)
@@ -284,7 +444,7 @@ def lambda_handler(event, context):
                 return response(400, message=f"Insufficient stock for product {failed_product_id}")
 
             # ── Pricing breakdown ─────────────────────────────────────────────
-            subtotal         = sum(i["price"] * i["quantity"] for i in processed_items)
+            subtotal         = int(sum(int(i["price"]) * int(i["quantity"]) for i in processed_items))
             delivery_charge  = 0 if subtotal >= 500 else 49
             gst              = round(subtotal * 0.18)
             grand_total      = subtotal + delivery_charge + gst
@@ -299,8 +459,13 @@ def lambda_handler(event, context):
                 "delivery_charge":delivery_charge,
                 "gst":            gst,
                 "grand_total":    grand_total,
-                "status":         "created"
+                "status":         "created",
+                "created_at":     datetime.utcnow().isoformat() + "Z"
             }
+
+            if not user_email:
+                print(f"WARN: Order created for user {user_id} with no email — transactional emails will not be sent. "
+                      "Ensure the Auth0 API has 'openid profile email' scopes and the JWT includes the email claim.")
 
             save_order(order)
             clear_cart(user_id)
@@ -367,6 +532,43 @@ def lambda_handler(event, context):
             save_order(order)
 
             return response(200, data=order, message="Order cancelled and inventory restored")
+
+        # 🔹 POST /return → create return request
+        if path == "/return" and method == "POST":
+            body = json.loads(event.get("body") or "{}")
+            
+            # Validate input
+            try:
+                validate(body, "create_return")
+            except ValueError as e:
+                return response(400, message=str(e))
+            
+            order_id = body.get("order_id")
+            reason = body.get("reason", "")
+
+            return_req, error = create_return_request(order_id, user_id, reason)
+            if error:
+                return response(400, message=error)
+
+            return response(200, data=return_req, message="Return request created")
+
+        # 🔹 GET /return/{id} → get return request
+        if path.startswith("/return/") and method == "GET":
+            return_id = path.split("/")[-1]
+            try:
+                result = get_returns_table().get_item(Key={"return_id": return_id})
+                return_req = result.get("Item")
+                
+                if not return_req:
+                    return response(404, message="Return request not found")
+                
+                if return_req.get("user_id") != user_id:
+                    return response(403, message="Not authorized")
+                
+                return response(200, data=convert_decimal(return_req))
+            except Exception as e:
+                print(f"ERROR getting return: {str(e)}")
+                return response(500, message="Internal server error")
 
         # 🔹 Invalid route
         return response(404, message="Route not found")

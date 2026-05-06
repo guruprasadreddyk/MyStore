@@ -84,3 +84,33 @@ body {
   70% { box-shadow: 0 0 0 10px rgba(255, 255, 255, 0); }
   100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); }
 }
+
+/* ── Global select / option styling ─────────────────────────────────────────
+   Browsers render <option> with OS-native styles by default (white bg on
+   Windows). Override globally so every dropdown in the app matches the dark
+   theme regardless of whether it uses a CSS class or inline styles.        */
+
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: rgba(0, 0, 0, 0.4);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  font-family: var(--font-sans);
+}
+
+select option {
+  background-color: #1a1a2e;
+  color: #fff;
+}
+
+select option:checked,
+select option:hover {
+  background-color: #2a2a4e;
+  color: #fff;
+}
+
+/* Ensure disabled options are visually distinct */
+select option:disabled {
+  color: rgba(255, 255, 255, 0.35);
+}

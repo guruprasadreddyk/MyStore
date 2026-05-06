@@ -67,3 +67,30 @@ variable "auth0_m2m_client_secret" {
   description = "Auth0 M2M application Client Secret"
   sensitive   = true
 }
+
+variable "razorpay_key_id" {
+  type        = string
+  default     = ""
+  description = "Razorpay Key ID (test or live)"
+  sensitive   = true
+}
+
+variable "razorpay_key_secret" {
+  type        = string
+  default     = ""
+  description = "Razorpay Key Secret (test or live)"
+  sensitive   = true
+}
+
+variable "resend_api_key" {
+  type        = string
+  default     = ""
+  description = "Resend API key for transactional emails"
+  sensitive   = true
+}
+
+variable "resend_from_email" {
+  type        = string
+  default     = "MyStore <onboarding@resend.dev>"
+  description = "Resend 'from' email address for transactional emails"
+}

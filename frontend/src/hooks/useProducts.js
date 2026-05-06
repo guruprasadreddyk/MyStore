@@ -9,8 +9,11 @@ export default function useProducts() {
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [minPrice, setMinPrice] = useState('');
   const [maxPrice, setMaxPrice] = useState('');
+  const [minRating, setMinRating] = useState('');
+  const [inStockOnly, setInStockOnly] = useState(false);
   const [sortBy, setSortBy] = useState('');
   const [loading, setLoading] = useState(false);
+  const [lastEvaluatedKey, setLastEvaluatedKey] = useState(null);
 
   const categories = useMemo(
     () => ['All', ...new Set(products.map((product) => product.category))],
@@ -39,7 +42,15 @@ export default function useProducts() {
       );
 
       try {
-        const data = await fetchSearchResultsApi(query);
+        const filters = {
+          minPrice,
+          maxPrice,
+          category: selectedCategory !== 'All' ? selectedCategory : undefined,
+          minRating: minRating || undefined,
+          inStockOnly: inStockOnly || undefined,
+        };
+        
+        const data = await fetchSearchResultsApi(query, filters);
         if (data.status === 'success') {
           // API returns { items: [...], lastEvaluatedKey, total }
           const items = data.data?.items ?? data.data;
@@ -57,7 +68,7 @@ export default function useProducts() {
     };
 
     fetchSearchResults();
-  }, [searchQuery, products]);
+  }, [searchQuery, products, minPrice, maxPrice, selectedCategory, minRating, inStockOnly]);
 
   useEffect(() => {
     let filtered = Array.isArray(searchResults)
@@ -78,6 +89,14 @@ export default function useProducts() {
       filtered = filtered.filter((product) => product.price <= parseFloat(maxPrice));
     }
 
+    if (minRating) {
+      filtered = filtered.filter((product) => (product.rating || 0) >= parseFloat(minRating));
+    }
+
+    if (inStockOnly) {
+      filtered = filtered.filter((product) => (product.stock_quantity || 0) > 0);
+    }
+
     if (sortBy === 'price_low_high') {
       filtered = [...filtered].sort((a, b) => a.price - b.price);
     } else if (sortBy === 'price_high_low') {
@@ -85,37 +104,56 @@ export default function useProducts() {
     }
 
     setFilteredProducts(filtered || []);
-  }, [products, searchResults, selectedCategory, minPrice, maxPrice, sortBy]);
+  }, [products, searchResults, selectedCategory, minPrice, maxPrice, minRating, inStockOnly, sortBy]);
 
-  const fetchProducts = async () => {
+  const fetchProducts = async (loadMore = false) => {
     setLoading(true);
-    let allFetchedProducts = [];
-    let currentKey = null;
-    let hasMore = true;
+    const startKey = loadMore ? lastEvaluatedKey : null;
 
     try {
-      while (hasMore) {
+      // On initial load, fetch all pages automatically so the full catalog is available
+      // for client-side filtering and pagination. On "Load More", fetch one page at a time.
+      if (loadMore) {
         const data = await fetchProductsApi({
-          lastEvaluatedKey: currentKey,
+          lastEvaluatedKey: startKey,
           minPrice,
           maxPrice,
           category: selectedCategory,
           sortBy,
         });
-
         if (data.status === 'success') {
           const newProducts = data.data.items || [];
-          const existingIds = new Set(allFetchedProducts.map(p => p.id));
-          const newUniqueProducts = newProducts.filter(p => !existingIds.has(p.id));
-          allFetchedProducts = [...allFetchedProducts, ...newUniqueProducts];
-          
-          currentKey = data.data.lastEvaluatedKey || null;
-          hasMore = !!currentKey;
-        } else {
-          hasMore = false;
+          const existingIds = new Set(products.map(p => p.id));
+          const unique = newProducts.filter(p => !existingIds.has(p.id));
+          setProducts(prev => [...prev, ...unique]);
+          setLastEvaluatedKey(data.data.lastEvaluatedKey || null);
         }
+      } else {
+        // Fetch all pages on initial load
+        let allProducts = [];
+        let currentKey = null;
+        let hasMore = true;
+        while (hasMore) {
+          const data = await fetchProductsApi({
+            lastEvaluatedKey: currentKey,
+            minPrice,
+            maxPrice,
+            category: selectedCategory,
+            sortBy,
+          });
+          if (data.status === 'success') {
+            const newProducts = data.data.items || [];
+            const existingIds = new Set(allProducts.map(p => p.id));
+            allProducts = [...allProducts, ...newProducts.filter(p => !existingIds.has(p.id))];
+            currentKey = data.data.lastEvaluatedKey || null;
+            hasMore = !!currentKey;
+          } else {
+            hasMore = false;
+          }
+        }
+        setProducts(allProducts);
+        setLastEvaluatedKey(null); // all pages loaded, no more to fetch
       }
-      setProducts(allFetchedProducts);
     } catch (error) {
       console.error('Error fetching products:', error);
     } finally {
@@ -150,8 +188,13 @@ export default function useProducts() {
     setMinPrice,
     maxPrice,
     setMaxPrice,
+    minRating,
+    setMinRating,
+    inStockOnly,
+    setInStockOnly,
     sortBy,
     setSortBy,
+    lastEvaluatedKey,
     fetchProducts,
     adjustProductStock,
   };

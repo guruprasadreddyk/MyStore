@@ -37,7 +37,7 @@ export default function useCart() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
 
-  const addToCart = async (productId) => {
+  const addToCart = async (productId, variantId) => {
     if (!isAuthenticated) {
       return { status: 'error', message: 'Authentication required' };
     }
@@ -45,7 +45,7 @@ export default function useCart() {
     setLoading(true);
     try {
       const headers = await getHeaders(isAuthenticated, getAccessTokenSilently);
-      const data = await addToCartApi(productId, headers);
+      const data = await addToCartApi(productId, variantId, headers);
 
       if (data.status === 'success') {
         setCart(data.data || []);
@@ -60,7 +60,7 @@ export default function useCart() {
     }
   };
 
-  const removeFromCart = async (productId) => {
+  const removeFromCart = async (productId, variantId = null) => {
     if (!isAuthenticated) {
       return { status: 'error', message: 'Authentication required' };
     }
@@ -68,7 +68,7 @@ export default function useCart() {
     setLoading(true);
     try {
       const headers = await getHeaders(isAuthenticated, getAccessTokenSilently);
-      const data = await removeFromCartApi(productId, headers);
+      const data = await removeFromCartApi(productId, headers, variantId);
 
       if (data.status === 'success') {
         setCart(data.data || []);

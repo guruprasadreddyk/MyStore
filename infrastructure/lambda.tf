@@ -44,12 +44,19 @@ resource "aws_lambda_function" "function" {
         SQS_QUEUE_NAME = var.sqs_queue_name
         SNS_TOPIC_NAME = var.sns_topic_name
         AWS_REGION_NAME = var.aws_region
+        RESEND_API_KEY = var.resend_api_key
+        RESEND_FROM = var.resend_from_email
       },
       # Auth0 M2M credentials — only injected into user_service
       each.key == "user" ? {
         AUTH0_DOMAIN            = var.auth0_domain
         AUTH0_M2M_CLIENT_ID     = var.auth0_m2m_client_id
         AUTH0_M2M_CLIENT_SECRET = var.auth0_m2m_client_secret
+      } :
+      # Razorpay credentials — only injected into payment_service
+      each.key == "payment" ? {
+        RAZORPAY_KEY_ID     = var.razorpay_key_id
+        RAZORPAY_KEY_SECRET = var.razorpay_key_secret
       } : {}
     )
   }

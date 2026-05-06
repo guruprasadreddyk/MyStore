@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useAuth0 } from '@auth0/auth0-react';
 import {
-  fetchOrders as fetchOrdersApi,
+  fetchOrders,
   getHeaders,
   placeOrder as placeOrderApi,
   processPayment as processPaymentApi,
-  cancelOrder as cancelOrderApi
+  cancelOrder as cancelOrderApi,
+  submitReview as submitReviewApi,
 } from '../services/api';
 
 export default function useOrders() {
@@ -14,15 +15,15 @@ export default function useOrders() {
   const { getAccessTokenSilently, isAuthenticated } = useAuth0();
 
   const loadOrders = async () => {
-    if (!isAuthenticated) return; // ✅ FIX
+    if (!isAuthenticated) return;
 
     setLoading(true);
     try {
       const headers = await getHeaders(isAuthenticated, getAccessTokenSilently);
-      const data = await fetchOrdersApi(headers);
+      const data = await fetchOrders(headers);
 
       if (data.status === 'success') {
-        setOrders(data.data || []); // ✅ safe fallback
+        setOrders(data.data || []);
       } else {
         console.warn("Orders fetch failed:", data.message);
       }
@@ -102,6 +103,19 @@ export default function useOrders() {
     }
   };
 
+  const submitReview = async (productId, reviewData) => {
+    if (!isAuthenticated) {
+      return { status: 'error', message: 'Authentication required' };
+    }
+    try {
+      const headers = await getHeaders(isAuthenticated, getAccessTokenSilently);
+      return await submitReviewApi(productId, reviewData, headers);
+    } catch (error) {
+      console.error('Error submitting review:', error);
+      return { status: 'error', message: 'Unable to submit review' };
+    }
+  };
+
   return {
     orders,
     loading,
@@ -109,5 +123,6 @@ export default function useOrders() {
     placeOrder,
     processPayment,
     cancelOrder,
+    submitReview,
   };
 }

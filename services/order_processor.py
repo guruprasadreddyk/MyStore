@@ -1,90 +1,81 @@
 import json
 import boto3
 import os
-from utils import convert_decimal
+from utils import convert_decimal, send_email_via_resend, publish_sns_notification
 
-# Clients
-dynamodb = boto3.resource("dynamodb")
-sns = boto3.client("sns")
-sts = boto3.client("sts")
+# Lazy-load tables for testability
+def get_orders_table():
+    return boto3.resource("dynamodb").Table("orders_table_guru")
 
-orders_table = dynamodb.Table("orders_table_guru")
-products_table = dynamodb.Table("products_table_guru")
-
-def update_inventory(items):
-    for item in items:
-        product_id = item.get("id")
-        quantity = item.get("quantity", 1)
-        
-        try:
-            products_table.update_item(
-                Key={"id": str(product_id)},
-                UpdateExpression="SET stock_quantity = stock_quantity - :val",
-                ConditionExpression="stock_quantity >= :val",
-                ExpressionAttributeValues={":val": quantity}
-            )
-            print(f"INFO: Deducted {quantity} from product {product_id}")
-        except Exception as e:
-            print(f"ERROR: Failed to update inventory for {product_id}: {str(e)}")
-            # Real systems would likely throw an error to dead-letter the SQS message here.
 
 def publish_shipping_notification(order):
-    try:
-        account_id  = sts.get_caller_identity()['Account']
-        region      = os.environ.get("AWS_REGION_NAME", "ap-southeast-1")
-        topic_name  = os.environ.get("SNS_TOPIC_NAME", "order-notifications-guru")
-        topic_arn   = f"arn:aws:sns:{region}:{account_id}:{topic_name}"
-        customer_email = order.get('user_email', '')
-        name           = order.get('address', {}).get('full_name', 'there')
-        city           = order.get('address', {}).get('city', '')
+    customer_email = order.get('user_email', '')
+    name           = order.get('address', {}).get('full_name', 'there')
+    city           = order.get('address', {}).get('city', '')
+    order_ref      = order['order_id'][:8].upper()
 
-        subject = f"Order Shipped: #{order['order_id'][:8].upper()}"
-        message = (
-            f"Hi {name},\n\n"
-            f"Great news! Your order #{order['order_id'][:8].upper()} has been shipped.\n"
-            f"Estimated delivery to {city} in 3-5 business days.\n\n"
-            f"customer_email: {customer_email}"
-        )
+    # SNS (admin)
+    publish_sns_notification(
+        subject=f"Order Shipped: #{order_ref}",
+        message=f"Order #{order_ref} shipped to {name} ({customer_email}) in {city}."
+    )
 
-        sns.publish(TopicArn=topic_arn, Subject=subject, Message=message)
-        print(f"INFO: Shipping notification sent for order {order['order_id']}")
-    except Exception as e:
-        print(f"ERROR publishing to SNS: {str(e)}")
+    # Resend (customer)
+    send_email_via_resend(
+        to_email  = customer_email,
+        subject   = f"Your Order Has Shipped — #{order_ref} | MyStore",
+        html_body = f"""<div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
+<h2 style="color:#06b6d4">🚚 Your Order Has Shipped!</h2>
+<p>Hi <strong>{name}</strong>, great news!</p>
+<p>Your order <strong>#{order_ref}</strong> has been dispatched and is on its way to <strong>{city}</strong>.</p>
+<p>Estimated delivery: <strong>3–5 business days</strong>.</p>
+<hr style="border:none;border-top:1px solid #eee;margin:24px 0"/>
+<p style="font-size:0.8rem;color:#999">MyStore · This is an automated email.</p>
+</div>""",
+        text_body = f"Hi {name}, your order #{order_ref} has shipped! Estimated delivery to {city} in 3-5 business days."
+    )
+
 
 def lambda_handler(event, context):
     try:
         # Process each SQS message
-        for record in event['Records']:
-            message_body = json.loads(record['body'])
+        for record in event.get('Records', []):
+            try:
+                message_body = json.loads(record['body'])
+            except (json.JSONDecodeError, KeyError):
+                print("ERROR: Invalid JSON in SQS message")
+                continue
+
             order_id = message_body.get('order_id')
-            
-            if order_id:
-                # 1. Load the order
-                order = orders_table.get_item(Key={"order_id": order_id}).get("Item")
-                if order:
-                    print(f"INFO: Processing order {order_id}")
 
-                    # Inventory was already reserved atomically at order creation time.
-                    # The processor's job is fulfillment: update status and notify.
-
-                    # 2. Update order status to 'shipped'
-                    order['status'] = 'shipped'
-                    orders_table.put_item(Item=order)
-                    print(f"INFO: Order {order_id} status updated to shipped")
-                    
-                    # 3. Send shipping notification via SNS
-                    publish_shipping_notification(order)
-                    
-                else:
-                    print(f"ERROR: Order {order_id} not found")
-            else:
+            if not order_id:
                 print("ERROR: No order_id in message")
-                
+                continue
+
+            # Load the order
+            order = get_orders_table().get_item(Key={"order_id": order_id}).get("Item")
+            if not order:
+                print(f"ERROR: Order {order_id} not found")
+                continue
+
+            print(f"INFO: Processing order {order_id}")
+
+            # Update order status to 'shipped'
+            order['status'] = 'shipped'
+            get_orders_table().put_item(Item=order)
+            print(f"INFO: Order {order_id} status updated to shipped")
+
+            # Send shipping notification (non-fatal if it fails)
+            try:
+                publish_shipping_notification(order)
+            except Exception as e:
+                print(f"ERROR sending shipping notification for {order_id}: {str(e)}")
+
         return {
             'statusCode': 200,
             'body': json.dumps('Order processing completed')
         }
-        
+
     except Exception as e:
         print(f"ERROR in order processor: {str(e)}")
         return {

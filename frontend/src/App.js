@@ -20,14 +20,16 @@ import useOrders from './hooks/useOrders';
 import useRecommendations from './hooks/useRecommendations';
 import useWishlist from './hooks/useWishlist';
 import { useAuth0 } from "@auth0/auth0-react";
+import { apiFetch, getHeaders } from './services/api';
 
 const APP_NAME = 'MyStore';
 
 function App() {
-  const { isLoading } = useAuth0();
+  const { isLoading, isAuthenticated, getAccessTokenSilently } = useAuth0();
 
   
   const {
+    products,
     filteredProducts,
     categories,
     loading: productsLoading,
@@ -39,6 +41,10 @@ function App() {
     setMinPrice,
     maxPrice,
     setMaxPrice,
+    minRating,
+    setMinRating,
+    inStockOnly,
+    setInStockOnly,
     sortBy,
     setSortBy,
     lastEvaluatedKey,
@@ -61,9 +67,10 @@ function App() {
     placeOrder,
     processPayment,
     cancelOrder,
+    submitReview,
   } = useOrders();
 
-  const { recommendations, showRecommendations } = useRecommendations(cart);
+  const { recommendations, showRecommendations } = useRecommendations(cart, orders);
   const { wishlist, toggleWishlist, isInWishlist } = useWishlist();
 
   const handleToggleWishlist = async (product) => {
@@ -100,22 +107,13 @@ function App() {
     return <div>Loading authentication...</div>;
   }
 
-  const handlePlaceOrder = async ({ address, grandTotal }) => {
-    if (cart.length === 0) {
-      addToast('Cart is empty', 'error');
-      return;
-    }
-
-    const items = cart.map((item) => ({ id: item.id }));
-    const data  = await placeOrder(items, address);
-
-    if (data.status === 'success') {
-      adjustProductStock(cart);
+  const handlePlaceOrder = async ({ address, grandTotal, paymentComplete }) => {
+    // Order was already created and paid inside Checkout.js.
+    // This callback just closes the modal and navigates to orders.
+    if (paymentComplete) {
       setIsCheckoutOpen(false);
       navigate('/orders');
-      addToast('Order placed! Proceed to payment.', 'success');
-    } else {
-      addToast(data.message || 'Order placement failed', 'error');
+      addToast('Order placed and payment confirmed!', 'success');
     }
   };
 
@@ -144,6 +142,27 @@ function App() {
     }
   };
 
+  const handleRequestReturn = async (orderId, reason) => {
+    try {
+      const headers = await getHeaders(isAuthenticated, getAccessTokenSilently);
+      const data = await apiFetch('/return', {
+        method: 'POST',
+        headers,
+        body: { order_id: orderId, reason },
+      });
+
+      if (data.status === 'success') {
+        addToast('Return request submitted successfully', 'success');
+        setTimeout(() => { window.location.reload(); }, 1500);
+      } else {
+        addToast(data.message || 'Failed to submit return request', 'error');
+      }
+    } catch (error) {
+      console.error('Return request error:', error);
+      addToast('Failed to submit return request. Please try again.', 'error');
+    }
+  };
+
   const handleAddToCart = async (productId) => {
     const data = await addToCart(productId);
     if (data && data.status === 'success') {
@@ -161,6 +180,7 @@ function App() {
         onOpenCart={() => setIsCartOpen(true)}
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
+        products={products}
       />
       <main>
         <Routes>
@@ -181,6 +201,10 @@ function App() {
               setMinPrice={setMinPrice}
               maxPrice={maxPrice}
               setMaxPrice={setMaxPrice}
+              minRating={minRating}
+              setMinRating={setMinRating}
+              inStockOnly={inStockOnly}
+              setInStockOnly={setInStockOnly}
               sortBy={sortBy}
               setSortBy={setSortBy}
               recommendations={recommendations}
@@ -205,6 +229,8 @@ function App() {
               loading={loading}
               processPayment={handleProcessPayment}
               cancelOrder={handleCancelOrder}
+              requestReturn={handleRequestReturn}
+              submitReview={submitReview}
             />
           } />
           <Route path="/admin" element={<AdminPanel />} />
@@ -232,7 +258,8 @@ function App() {
             cart={cart}
             onConfirm={handlePlaceOrder}
             onCancel={() => { setIsCheckoutOpen(false); setIsCartOpen(true); }}
-            loading={loading}
+            loading={cartLoading}
+            addToast={addToast}
           />
         </div>
       )}

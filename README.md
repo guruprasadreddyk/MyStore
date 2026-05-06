@@ -1,221 +1,310 @@
-# MyStore
+# MyStore E-commerce Platform
 
-> A production-grade, fully serverless e-commerce platform built on AWS.
+A full-stack serverless e-commerce platform built with React, AWS Lambda, DynamoDB, and Auth0.
 
-React frontend · Python Lambdas · DynamoDB · Auth0 · Terraform IaC
+## 🚀 Features
 
----
+- **Product Catalog** - Browse, search, and filter products with pagination
+- **Product Variants** - Size, color, and capacity options for products
+- **Shopping Cart** - Add/remove items with automatic cart management
+- **Wishlist** - Save favorite products for later
+- **User Authentication** - Secure Auth0 JWT-based authentication
+- **Order Management** - Create orders with address validation and order tracking
+- **Payment Processing** - Razorpay integration with fallback simulation mode
+- **Product Reviews** - Rate and review products (verified purchase only)
+- **Return Management** - Request, approve, reject, and refund returns
+- **Recommendations** - AI-powered product recommendations based on cart/wishlist
+- **Email Notifications** - Transactional emails via Resend API
+- **Admin Panel** - Manage products, orders, returns, and inventory with analytics dashboard
 
-## Features
+## 🛠️ Tech Stack
 
-**Shopping**
-- 40 products across 5 categories (Books, Electronics, Clothing, Home & Kitchen, Sports & Fitness)
-- Cursor-based pagination, category filters, price range, sort by price
-- Full-text search with server-side price and category filtering
-- Product recommendations based on cart contents
-- Quick view modal, wishlist with cloud sync
+### Frontend
+- **React 18** - UI framework
+- **React Router v7** - Client-side routing
+- **Auth0 React SDK** - Authentication
+- **CSS3** - Styling (no framework dependencies)
 
-**Cart & Checkout**
-- Per-user cart with quantity controls (+ / −) and stock validation
-- 7-day TTL auto-expiry on abandoned carts (DynamoDB native TTL)
-- Checkout with Indian address form (state dropdown, phone + PIN validation)
-- Pricing breakdown: subtotal + GST (18%) + delivery (free above ₹500)
+### Backend
+- **AWS Lambda** - Serverless compute (Python 3.12)
+- **API Gateway HTTP API** - RESTful API with JWT authorizer
+- **DynamoDB** - NoSQL database with GSI for efficient queries
+- **SQS** - Asynchronous order processing queue
+- **SNS** - Admin notifications via email
 
-**Orders & Payments**
-- Full order lifecycle: `created → paid → shipped → delivered`
-- Atomic inventory reservation at order creation (conditional DynamoDB writes)
-- Order cancellation with automatic inventory rollback (only before payment)
-- Payment processing with business-rule decline simulation (INSUFFICIENT_FUNDS, CARD_VELOCITY_EXCEEDED)
-- Async fulfillment via SQS — orders marked shipped only after payment succeeds
+### Infrastructure
+- **Terraform** - Infrastructure as Code
+- **CloudFront** - CDN for frontend distribution
+- **S3** - Static website hosting
+- **IAM** - Fine-grained access control
 
-**Account**
-- Auth0 PKCE authentication (Google, email/password)
-- Saved delivery addresses with default selection
-- User profile: display name, phone, bio (stored in DynamoDB, synced to Auth0)
-- Email verification via Auth0 Management API
-- Order history with expandable pricing breakdown and delivery address
+### Third-Party Services
+- **Auth0** - User authentication and authorization
+- **Razorpay** - Payment gateway (Indian market)
+- **Resend** - Transactional email delivery
 
-**Admin Panel** *(role-gated)*
-- Dashboard: total orders, revenue, orders by status, low stock alerts, top products
-- Product management: add, edit (price, stock, name, description), delete
-- Order management: view all orders across all users, filter by status, update status
+## 📋 Prerequisites
 
----
+- **Node.js** 18+ and npm
+- **Python** 3.12+
+- **Terraform** 1.0+
+- **AWS CLI** configured with appropriate credentials
+- **Auth0 account** with API configured
+- **Razorpay account** (optional, falls back to simulation)
+- **Resend API key** (optional, for email notifications)
 
-## Architecture
+## ⚡ Quick Start
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Browser (React 18 SPA)                   │
-│                  Auth0 PKCE → JWT Bearer                    │
-└──────────────────────────┬──────────────────────────────────┘
-                           │ HTTPS
-                           ▼
-┌─────────────────────────────────────────────────────────────┐
-│              CloudFront (CDN + SPA routing)                 │
-│         S3 (static)  │  API Gateway (dynamic)              │
-└──────────────────────┬──────────────────────────────────────┘
-                       │ JWT Authorizer (Auth0)
-         ┌─────────────┼──────────────────────────┐
-         ▼             ▼                           ▼
-  catalog_service  user_service            order_service
-  products, search  cart, wishlist,        order CRUD,
-  recommendations   addresses, profile     cancellation
-                                                │
-                   admin_service          payment_service
-                   dashboard,             payment rules,
-                   product & order mgmt   SQS trigger
-                                                │
-                                           SQS Queue
-                                                │
-                                                ▼
-                                       order_processor
-                                       status → shipped
-                                       SNS notification
-         │             │                       │
-         └─────────────┴───────────────────────┘
-                       │
-         ┌─────────────┴──────────────────────────┐
-         │              DynamoDB (5 tables)        │
-         │  products_table_guru                    │
-         │  cart_table_guru      (TTL enabled)     │
-         │  orders_table_guru                      │
-         │  wishlist_table_guru                    │
-         │  user_data_table_guru (addresses+profile│
-         └─────────────────────────────────────────┘
+### 1. Clone the repository
+
+```bash
+git clone <repository-url>
+cd <repository-name>
 ```
 
----
+### 2. Configure environment variables
 
-## Tech Stack
+Create `infrastructure/terraform.tfvars`:
 
-| Layer | Technology | Notes |
-|---|---|---|
-| Frontend | React 18, React Router v6 | SPA, no SSR |
-| Auth | Auth0 (PKCE + M2M) | JWT, email verify, profile sync |
-| Hosting | CloudFront + S3 | Private bucket, OAI, SPA routing fix |
-| API | API Gateway HTTP/2 | JWT authorizer, 50 RPS / 100 burst |
-| Compute | AWS Lambda, Python 3.12 | 6 functions, pay-per-invocation |
-| Database | DynamoDB | 5 tables, pay-per-request, TTL on cart |
-| Messaging | SNS + SQS | Async fulfillment, email notifications, DLQ |
-| IaC | Terraform ≥ 1.0 | AWS provider ~6.0 |
-| Tests | pytest + moto | 46 tests, full AWS mocking |
-
----
-
-## Lambda Functions
-
-| Function | Handles |
-|---|---|
-| `catalog_service_guru` | Products, search, recommendations (public) |
-| `cart_service_guru` | Cart, wishlist, addresses, profile, Auth0 M2M |
-| `order_service_guru` | Order CRUD, inventory reservation, cancellation |
-| `payment_service_guru` | Payment processing, SQS fulfillment trigger |
-| `processor_service_guru` | SQS consumer → marks orders shipped, SNS |
-| `admin_service_guru` | Admin dashboard, product & order management |
-
----
-
-## Order Flow
-
-```
-Add to cart → Checkout (address + pricing) → POST /order
-    → inventory reserved atomically
-    → cart cleared
-    → status: created
-
-Pay Now → POST /payment
-    → amount validated against grand_total
-    → business rules checked
-    → status: paid
-    → SQS message sent
-
-order_processor (SQS trigger)
-    → status: shipped
-    → SNS shipping notification
+```hcl
+aws_region              = "ap-southeast-1"
+aws_profile             = "your-aws-profile"
+notification_email      = "your-email@example.com"
+auth0_domain            = "your-tenant.auth0.com"
+auth0_audience          = "https://api.mystore.com"
+auth0_m2m_client_id     = "your-m2m-client-id"
+auth0_m2m_client_secret = "your-m2m-client-secret"
+razorpay_key_id         = "your-razorpay-key-id"
+razorpay_key_secret     = "your-razorpay-key-secret"
+resend_api_key          = "your-resend-api-key"
+resend_from_email       = "MyStore <noreply@yourdomain.com>"
 ```
 
----
+### 3. Deploy infrastructure
 
-## Quick Start
-
-```powershell
-# Activate virtual environment
-.venv\Scripts\activate
-
-# Run all 46 tests
-python run_tests.py
-
-# Build Lambda zip packages
-powershell -ExecutionPolicy Bypass -File scripts/build_lambdas.ps1
-
-# Deploy infrastructure (requires terraform.tfvars — see docs/DEPLOYMENT.md)
+```bash
 cd infrastructure
-terraform apply -auto-approve
-cd ..
-
-# Seed 40 products into DynamoDB
-python scripts/seed_products.py
-
-# Build and deploy React frontend to S3 + CloudFront
-powershell -ExecutionPolicy Bypass -File scripts/deploy_frontend.ps1
+terraform init
+terraform plan
+terraform apply
 ```
 
----
+Note the outputs:
+- `api_url` - Your API Gateway endpoint
+- `cloudfront_url` - Your frontend CDN URL
+- `s3_bucket_name` - Frontend hosting bucket
 
-## Project Structure
+### 4. Seed products
 
-```
-MyStore/
-├── services/
-│   ├── utils.py              # Shared: response(), convert_decimal(), get_user_id()
-│   ├── catalog_service.py    # Products, search, recommendations
-│   ├── user_service.py       # Cart, wishlist, addresses, profile
-│   ├── order_service.py      # Order lifecycle, inventory reservation
-│   ├── payment_service.py    # Payment, decline rules, SQS trigger
-│   ├── order_processor.py    # SQS consumer → shipped + SNS
-│   └── admin_service.py      # Admin dashboard and management
-├── tests/                    # 46 pytest tests (moto for AWS mocking)
-├── frontend/
-│   └── src/
-│       ├── components/       # 16 React components
-│       ├── hooks/            # 5 custom hooks (cart, orders, products, wishlist, recommendations)
-│       └── services/api.js   # All API call functions
-├── infrastructure/
-│   ├── variables.tf          # All config variables
-│   ├── terraform.tfvars      # Secret values (gitignored)
-│   ├── lambda.tf             # 6 Lambda definitions + env vars
-│   ├── api.tf                # API Gateway + 33 routes
-│   ├── dynamodb.tf           # 5 DynamoDB tables
-│   ├── messaging.tf          # SNS + SQS + DLQ
-│   ├── frontend.tf           # S3 + CloudFront
-│   └── iam.tf                # Lambda execution role
-├── scripts/
-│   ├── build_lambdas.ps1     # Packages each service + utils.py into zip
-│   ├── deploy_frontend.ps1   # npm build → S3 sync → CloudFront invalidation
-│   └── seed_products.py      # Seeds 40 products into DynamoDB
-├── run_tests.py              # Test runner
-└── openapi-spec.json         # OpenAPI 3.0 specification
+```bash
+cd ../scripts
+python seed_products.py
 ```
 
----
+### 5. Build and deploy frontend
 
-## Tests
+```bash
+cd ../frontend
+npm install
+npm run build
+
+# Deploy to S3 (PowerShell)
+cd ../scripts
+./deploy_frontend.ps1
+```
+
+### 6. Configure Auth0
+
+1. Create an Auth0 Application (Single Page Application)
+2. Set **Allowed Callback URLs**: `http://localhost:3000, https://your-cloudfront-url`
+3. Set **Allowed Logout URLs**: `http://localhost:3000, https://your-cloudfront-url`
+4. Set **Allowed Web Origins**: `http://localhost:3000, https://your-cloudfront-url`
+5. Create an API with identifier: `https://api.mystore.com`
+6. Update `frontend/src/index.js` with your Auth0 domain and client ID
+
+### 7. Access the application
+
+- **Production**: `https://your-cloudfront-url`
+- **Local Development**: `npm start` (from frontend directory)
+
+## 📁 Project Structure
 
 ```
-46 tests · 5 files · 0 failures
+.
+├── frontend/                 # React frontend application
+│   ├── src/
+│   │   ├── components/      # React components (with component-scoped CSS)
+│   │   ├── hooks/           # Custom React hooks
+│   │   └── services/        # API service layer
+│   └── public/              # Static assets
+├── services/                # Lambda function handlers
+│   ├── catalog_service.py   # Product catalog, search & reviews
+│   ├── order_service.py     # Order management & returns
+│   ├── payment_service.py   # Payment processing (Razorpay)
+│   ├── user_service.py      # User profile, cart & wishlist
+│   ├── admin_service.py     # Admin operations & analytics
+│   ├── order_processor.py   # SQS order fulfillment
+│   ├── utils.py             # Shared utilities (email, SNS, order status)
+│   └── validation.py        # Input validation (no external dependencies)
+├── infrastructure/          # Terraform IaC
+│   ├── main.tf             # Provider configuration
+│   ├── lambda.tf           # Lambda functions
+│   ├── api.tf              # API Gateway routes
+│   ├── api_versioning.tf   # Versioned API routes (v1)
+│   ├── dynamodb.tf         # Database tables
+│   ├── messaging.tf        # SQS & SNS
+│   ├── frontend.tf         # S3 & CloudFront
+│   └── iam.tf              # IAM roles & policies
+├── scripts/                # Deployment & utility scripts
+│   ├── build_lambdas.ps1   # Package Lambda functions (no dependencies)
+│   ├── deploy_frontend.ps1 # Deploy frontend to S3
+│   └── seed_products.py    # Seed initial product data
+├── tests/                  # Test suites
+└── docs/                   # Documentation
 ```
 
-All AWS services are mocked with `moto` — no real AWS calls during tests.
+## 🔑 Key Endpoints
 
-```powershell
+### Public Endpoints (No Auth Required)
+- `GET /products` - List products with pagination
+- `GET /products/{id}` - Get product details
+- `GET /products/{id}/variants` - Get product variants
+- `GET /products/{id}/reviews` - Get product reviews
+- `GET /search` - Search products with filters
+- `GET /recommendations` - Get product recommendations
+
+### Protected Endpoints (Auth Required)
+- `GET /cart` - Get cart contents
+- `POST /cart/add` - Add item to cart
+- `DELETE /cart/remove/{id}` - Remove item from cart
+- `POST /order` - Create order
+- `GET /order` - Get order history
+- `POST /payment` - Process payment
+- `GET /wishlist` - Get wishlist
+- `POST /wishlist/add` - Add to wishlist
+- `POST /products/{id}/reviews` - Submit product review (verified purchase only)
+- `POST /return` - Create return request
+- `GET /return/{id}` - Get return request details
+
+### Admin Endpoints (Admin Role Required)
+- `GET /admin/dashboard` - Get dashboard stats with analytics
+- `GET /admin/products` - List all products
+- `PUT /admin/products/{id}` - Update product
+- `DELETE /admin/products/{id}` - Delete product
+- `GET /admin/orders` - List all orders
+- `PUT /admin/orders/{id}` - Update order status
+- `GET /admin/returns` - List all return requests
+- `PUT /admin/returns/{id}/approve` - Approve return request
+- `PUT /admin/returns/{id}/reject` - Reject return request with reason
+- `PUT /admin/returns/{id}/refund` - Process refund for approved return
+
+See [API Documentation](docs/API.md) for complete API reference.
+
+## 🧪 Testing
+
+```bash
+# Run all tests
 python run_tests.py
+
+# Run specific test file
+python -m pytest tests/test_catalog_service.py -v
 ```
 
-| File | Coverage |
-|---|---|
-| `test_product_service.py` | Product fetch, pagination |
-| `test_search_service.py` | Search, price filter, category filter |
-| `test_cart_service.py` | Add/remove/clear, stock validation |
-| `test_order_service.py` | Order creation, address validation, inventory, cancellation |
-| `test_payment_service.py` | Payment success, decline rules, amount mismatch |
+## 📊 Monitoring
+
+- **CloudWatch Logs** - Lambda execution logs
+- **CloudWatch Metrics** - API Gateway metrics, Lambda invocations
+- **DynamoDB Metrics** - Read/write capacity, throttling
+- **X-Ray** - Distributed tracing (if enabled)
+
+## 🔒 Security
+
+- **JWT Authentication** - Auth0-issued tokens with audience validation
+- **HTTPS Only** - All API traffic encrypted via API Gateway
+- **CORS** - Configured for frontend domain only
+- **IAM Least Privilege** - Lambda functions have minimal required permissions
+- **Input Validation** - All user inputs validated before processing
+- **SQL Injection Protection** - DynamoDB NoSQL (no SQL injection risk)
+- **Secrets Management** - Sensitive credentials stored in Terraform variables
+
+## 🚀 Deployment
+
+### Production Deployment Checklist
+
+- [ ] Update Auth0 callback URLs with production domain
+- [ ] Configure custom domain for API Gateway
+- [ ] Enable CloudFront custom domain with SSL certificate
+- [ ] Set up CloudWatch alarms for critical metrics
+- [ ] Enable DynamoDB point-in-time recovery (already enabled)
+- [ ] Configure backup retention policies
+- [ ] Set up monitoring dashboards
+- [ ] Test payment flow with real Razorpay credentials
+- [ ] Configure email templates in Resend
+- [ ] Review and adjust Lambda memory/timeout settings
+- [ ] Enable API Gateway access logging
+- [ ] Set up WAF rules for API protection
+
+See [Deployment Guide](docs/DEPLOYMENT.md) for detailed instructions.
+
+## 📖 Documentation
+
+- [API Reference](docs/API.md) - Complete API documentation
+- [Architecture](docs/ARCHITECTURE.md) - System design and data flow
+- [Database Schema](docs/DATABASE.md) - DynamoDB table structures
+- [Setup Guide](docs/SETUP.md) - Detailed setup instructions
+- [Deployment Guide](docs/DEPLOYMENT.md) - Production deployment
+- [Security](docs/SECURITY.md) - Security best practices
+- [Troubleshooting](docs/TROUBLESHOOTING.md) - Common issues and fixes
+
+## 🔮 Future Work
+
+### Observability
+- **CloudWatch integration** — Enable API Gateway access logging and Lambda execution logs to `/aws/apigateway/` log groups. Add CloudWatch alarms for 4xx/5xx error rates and Lambda throttles.
+- **X-Ray tracing** — Distributed tracing across Lambda functions to identify latency bottlenecks.
+- **Custom metrics dashboard** — CloudWatch dashboard for order volume, payment success rate, and inventory alerts.
+
+### Security
+- **AWS WAF** — Attach a Web Application Firewall to the API Gateway stage for IP-based rate limiting, bot protection, and OWASP rule sets.
+- **DynamoDB-based rate limiting** — Per-user request counters in DynamoDB as a WAF alternative for sensitive endpoints (`/payment`, `/order`).
+- **SNS-based abuse alerts** — Publish to the existing SNS topic when a user exceeds a request threshold within a Lambda, without needing WAF or CloudWatch.
+
+### Infrastructure
+- **Dead letter queue (DLQ)** — Add an SQS DLQ for the order processing queue so failed fulfillment messages are not silently dropped.
+- **Lambda provisioned concurrency** — Eliminate cold starts on the catalog and payment services for consistent response times.
+- **Multi-region deployment** — DynamoDB Global Tables + multi-region Lambda for disaster recovery and lower latency outside ap-southeast-1.
+
+### Features
+- **Order tracking page** — Real-time shipment tracking with carrier integration.
+- **Discount codes and coupons** — Promo code validation at checkout.
+- **Inventory alerts** — Notify admin via SNS when stock drops below a configurable threshold.
+- **Review moderation** — Admin endpoint to flag or remove reviews.
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## 📝 License
+
+This project is licensed under the MIT License.
+
+## 🙏 Acknowledgments
+
+- Auth0 for authentication infrastructure
+- AWS for serverless platform
+- Razorpay for payment processing
+- Resend for email delivery
+- Picsum Photos for placeholder images
+
+## 📧 Support
+
+For issues and questions:
+- Create an issue in the repository
+- Email: support@mystore.com
+
+---
+
+**Built with ❤️ using serverless architecture**

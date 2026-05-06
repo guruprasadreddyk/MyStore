@@ -28,7 +28,48 @@ resource "aws_apigatewayv2_stage" "default" {
   name        = "$default"
   auto_deploy = true
 
+  # Global default — applies to every route not listed below
   default_route_settings {
+    throttling_burst_limit = 100
+    throttling_rate_limit  = 50
+  }
+
+  # Payment — tightest limit (expensive, fraud-sensitive)
+  route_settings {
+    route_key              = "POST /payment"
+    throttling_burst_limit = 10
+    throttling_rate_limit  = 5
+  }
+
+  route_settings {
+    route_key              = "POST /payment/create-order"
+    throttling_burst_limit = 10
+    throttling_rate_limit  = 5
+  }
+
+  # Order creation — moderate limit
+  route_settings {
+    route_key              = "POST /order"
+    throttling_burst_limit = 20
+    throttling_rate_limit  = 10
+  }
+
+  # Admin — low limit, internal use only
+  route_settings {
+    route_key              = "GET /admin/dashboard"
+    throttling_burst_limit = 10
+    throttling_rate_limit  = 5
+  }
+
+  # Public product browsing — higher limit, read-only
+  route_settings {
+    route_key              = "GET /products"
+    throttling_burst_limit = 200
+    throttling_rate_limit  = 100
+  }
+
+  route_settings {
+    route_key              = "GET /search"
     throttling_burst_limit = 100
     throttling_rate_limit  = 50
   }
@@ -59,6 +100,16 @@ locals {
     { name = "search",          route_key = "GET /search",                     integration = "catalog",  protected = false },
     { name = "recommendations", route_key = "GET /recommendations",            integration = "catalog",  protected = false },
     { name = "health",          route_key = "GET /health",                     integration = "catalog",  protected = false },
+    
+    # Product Variants (public)
+    { name = "variants_get",    route_key = "GET /products/{id}/variants",     integration = "catalog",  protected = false },
+    { name = "variant_get",     route_key = "GET /products/{id}/variants/{variant_id}", integration = "catalog", protected = false },
+    
+    # Product Reviews (public read, authenticated write)
+    { name = "reviews_get",     route_key = "GET /products/{id}/reviews",      integration = "catalog",  protected = false },
+    { name = "reviews_post",    route_key = "POST /products/{id}/reviews",     integration = "catalog",  protected = true },
+    { name = "review_helpful",  route_key = "PUT /reviews/{id}/helpful",       integration = "catalog",  protected = false },
+    { name = "review_delete",   route_key = "DELETE /reviews/{id}",            integration = "catalog",  protected = true },
 
     # Cart + Wishlist (authenticated)
     { name = "cart_get",        route_key = "GET /cart",                       integration = "user",     protected = true },
@@ -87,8 +138,13 @@ locals {
     { name = "order_put",       route_key = "PUT /order/{id}",                 integration = "order",    protected = true },
     { name = "order_cancel",    route_key = "DELETE /order/{id}",              integration = "order",    protected = true },
 
+    # Returns (authenticated)
+    { name = "return_post",     route_key = "POST /return",                    integration = "order",    protected = true },
+    { name = "return_get",      route_key = "GET /return/{id}",                integration = "order",    protected = true },
+
     # Payment (authenticated)
-    { name = "payment",         route_key = "POST /payment",                   integration = "payment",  protected = true },
+    { name = "payment",              route_key = "POST /payment",                   integration = "payment",  protected = true },
+    { name = "payment_create_order", route_key = "POST /payment/create-order",      integration = "payment",  protected = true },
 
     # Admin (authenticated — role checked inside Lambda)
     { name = "admin_dashboard", route_key = "GET /admin/dashboard",            integration = "admin",    protected = true },
@@ -98,6 +154,10 @@ locals {
     { name = "admin_products_del",  route_key = "DELETE /admin/products/{id}", integration = "admin",    protected = true },
     { name = "admin_orders_get",    route_key = "GET /admin/orders",           integration = "admin",    protected = true },
     { name = "admin_orders_put",    route_key = "PUT /admin/orders/{id}",      integration = "admin",    protected = true },
+    { name = "admin_returns_get",   route_key = "GET /admin/returns",          integration = "admin",    protected = true },
+    { name = "admin_returns_approve", route_key = "PUT /admin/returns/{id}/approve", integration = "admin", protected = true },
+    { name = "admin_returns_reject",  route_key = "PUT /admin/returns/{id}/reject",  integration = "admin", protected = true },
+    { name = "admin_returns_refund",  route_key = "PUT /admin/returns/{id}/refund",  integration = "admin", protected = true },
   ]
 }
 

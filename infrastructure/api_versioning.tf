@@ -37,7 +37,11 @@ locals {
     { name = "v1_order_get",        route_key = "GET /v1/order/{id}",                 integration = "order",    protected = true },
     { name = "v1_order_put",        route_key = "PUT /v1/order/{id}",                 integration = "order",    protected = true },
     { name = "v1_order_cancel",     route_key = "DELETE /v1/order/{id}",              integration = "order",    protected = true },
+
+    { name = "v1_return_post",      route_key = "POST /v1/return",                    integration = "order",    protected = true },
+    { name = "v1_return_get",       route_key = "GET /v1/return/{id}",                integration = "order",    protected = true },
     { name = "v1_payment",          route_key = "POST /v1/payment",                   integration = "payment",  protected = true },
+    { name = "v1_payment_create",   route_key = "POST /v1/payment/create-order",      integration = "payment",  protected = true },
     { name = "v1_admin_dashboard",  route_key = "GET /v1/admin/dashboard",            integration = "admin",    protected = true },
     { name = "v1_admin_prod_get",   route_key = "GET /v1/admin/products",             integration = "admin",    protected = true },
     { name = "v1_admin_prod_post",  route_key = "POST /v1/admin/products",            integration = "admin",    protected = true },
@@ -45,6 +49,10 @@ locals {
     { name = "v1_admin_prod_del",   route_key = "DELETE /v1/admin/products/{id}",     integration = "admin",    protected = true },
     { name = "v1_admin_orders_get", route_key = "GET /v1/admin/orders",               integration = "admin",    protected = true },
     { name = "v1_admin_orders_put", route_key = "PUT /v1/admin/orders/{id}",          integration = "admin",    protected = true },
+    { name = "v1_admin_returns_get", route_key = "GET /v1/admin/returns",             integration = "admin",    protected = true },
+    { name = "v1_admin_returns_approve", route_key = "PUT /v1/admin/returns/{id}/approve", integration = "admin", protected = true },
+    { name = "v1_admin_returns_reject",  route_key = "PUT /v1/admin/returns/{id}/reject",  integration = "admin", protected = true },
+    { name = "v1_admin_returns_refund",  route_key = "PUT /v1/admin/returns/{id}/refund",  integration = "admin", protected = true },
   ]
 }
 
