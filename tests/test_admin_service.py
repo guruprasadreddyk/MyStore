@@ -1,6 +1,14 @@
 """
 Tests for admin_service.py
 """
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'services'))
+
+os.environ['AWS_DEFAULT_REGION'] = 'us-east-1'
+os.environ['RESEND_API_KEY'] = 'test-key'
+os.environ['RESEND_FROM'] = 'test@example.com'
+
 import pytest
 import json
 from moto import mock_aws
@@ -36,7 +44,7 @@ def create_admin_event(path, method, body=None, query_params=None):
 def dynamodb_tables():
     """Create mock DynamoDB tables for testing."""
     with mock_aws():
-        dynamodb = boto3.resource('dynamodb', region_name='ap-southeast-1')
+        dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
         
         # Create products table
         products_table = dynamodb.create_table(
