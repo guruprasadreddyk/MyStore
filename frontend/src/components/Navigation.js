@@ -102,7 +102,8 @@ function Navigation({ cartItemCount, wishlistCount, onOpenCart, searchQuery, set
   );
 
   return (
-    <header className="App-header">
+    <>
+      <header className="App-header">
       {/* Brand */}
       <div className="brand-block">
         <h1>{APP_NAME}</h1>
@@ -291,7 +292,7 @@ function Navigation({ cartItemCount, wishlistCount, onOpenCart, searchQuery, set
                     {menuItem('🔔', 'Notifications',    () => navigate('/notifications'))}
                     {divider()}
                     {isAdmin && menuItem('⚙️', 'Admin Panel', () => navigate('/admin'))}
-                    {menuItem('❓', 'Help & Support', () => window.open('mailto:support@mystore.com'))}
+                    {menuItem('❓', 'Help & Support', () => window.open('mailto:updates.mystore@gmail.com'))}
                     {divider()}
                     <button
                       onClick={() => { setMenuOpen(false); logout({ logoutParams: { returnTo: window.location.origin } }); }}
@@ -316,6 +317,46 @@ function Navigation({ cartItemCount, wishlistCount, onOpenCart, searchQuery, set
         </div>
       </nav>
     </header>
+
+    {/* ── Email verification banner ─────────────────────────────────────── */}
+    {isAuthenticated && user && user.email_verified === false && (
+      <div style={{
+        background: 'rgba(245,158,11,0.12)',
+        borderBottom: '1px solid rgba(245,158,11,0.3)',
+        padding: '10px 24px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '12px',
+        fontSize: '0.85rem',
+        color: '#fbbf24',
+        position: 'sticky',
+        top: 0,
+        zIndex: 99,
+      }}>
+        <span>⚠️</span>
+        <span>
+          Your email <strong>{user.email}</strong> is not verified — you won't receive order or shipping updates until you do.
+        </span>
+        <button
+          onClick={() => navigate('/profile')}
+          style={{
+            padding: '4px 14px',
+            background: 'rgba(245,158,11,0.2)',
+            border: '1px solid rgba(245,158,11,0.5)',
+            borderRadius: '6px',
+            color: '#fbbf24',
+            cursor: 'pointer',
+            fontSize: '0.82rem',
+            fontWeight: 600,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          Verify now →
+        </button>
+      </div>
+    )}
+    </>
   );
 }
 

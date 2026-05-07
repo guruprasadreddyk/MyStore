@@ -64,6 +64,7 @@ function App() {
   const {
     orders,
     loading: ordersLoading,
+    loadOrders,
     placeOrder,
     processPayment,
     cancelOrder,
@@ -108,10 +109,9 @@ function App() {
   }
 
   const handlePlaceOrder = async ({ address, grandTotal, paymentComplete }) => {
-    // Order was already created and paid inside Checkout.js.
-    // This callback just closes the modal and navigates to orders.
     if (paymentComplete) {
       setIsCheckoutOpen(false);
+      await loadOrders();
       navigate('/orders');
       addToast('Order placed and payment confirmed!', 'success');
     }
@@ -163,13 +163,14 @@ function App() {
     }
   };
 
-  const handleAddToCart = async (productId) => {
-    const data = await addToCart(productId);
+  const handleAddToCart = async (productId, variantId) => {
+    const data = await addToCart(productId, variantId);
     if (data && data.status === 'success') {
       addToast('Item added to cart', 'success');
     } else {
       addToast(data?.message || 'Failed to add item', 'error');
     }
+    return data; // return so Wishlist can check success before removing
   };
   
   return (

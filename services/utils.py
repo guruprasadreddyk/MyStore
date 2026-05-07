@@ -1,22 +1,57 @@
 import json
 import os
-import urllib.request
 import boto3
 from decimal import Decimal
+from datetime import datetime
 
 
-# 🔹 Update order status (shared across services)
-def update_order_status(order_id, new_status):
-    """Update order status in orders table."""
+# ─── Table name resolution (env var → default) ───────────────────────────────
+
+def get_table_name(key):
+    """
+    Resolve DynamoDB table names from env vars so they can be overridden
+    per environment without code changes.
+    """
+    defaults = {
+        "products":  "products_table_guru",
+        "orders":    "orders_table_guru",
+        "cart":      "cart_table_guru",
+        "wishlist":  "wishlist_table_guru",
+        "user_data": "user_data_table_guru",
+        "reviews":   "reviews_table_guru",
+        "returns":   "returns_table_guru",
+    }
+    env_keys = {
+        "products":  "PRODUCTS_TABLE",
+        "orders":    "ORDERS_TABLE",
+        "cart":      "CART_TABLE",
+        "wishlist":  "WISHLIST_TABLE",
+        "user_data": "USER_DATA_TABLE",
+        "reviews":   "REVIEWS_TABLE",
+        "returns":   "RETURNS_TABLE",
+    }
+    return os.environ.get(env_keys[key], defaults[key])
+
+
+# 🔹 Update order status with history tracking (shared across services)
+def update_order_status(order_id, new_status, message=None):
+    """Update order status and append to status_history. Non-fatal on error."""
     try:
-        dynamodb = boto3.resource("dynamodb")
-        orders_table = dynamodb.Table("orders_table_guru")
-        
-        orders_table.update_item(
+        timestamp     = datetime.utcnow().isoformat() + "Z"
+        history_entry = {
+            "status":    new_status,
+            "timestamp": timestamp,
+            "message":   message or f"Order status changed to {new_status}"
+        }
+        boto3.resource("dynamodb").Table(get_table_name("orders")).update_item(
             Key={"order_id": str(order_id)},
-            UpdateExpression="SET #s = :status",
-            ExpressionAttributeNames={"#s": "status"},
-            ExpressionAttributeValues={":status": new_status}
+            UpdateExpression="SET #s = :status, #h = list_append(if_not_exists(#h, :empty), :entry)",
+            ExpressionAttributeNames={"#s": "status", "#h": "status_history"},
+            ExpressionAttributeValues={
+                ":status": new_status,
+                ":entry":  [history_entry],
+                ":empty":  []
+            }
         )
         print(f"INFO: Order {order_id} status updated to {new_status}")
         return True
@@ -49,17 +84,20 @@ def publish_sns_notification(subject, message):
         return False
 
 
-# 🔹 Send email via Resend API with retry logic
+# 🔹 Send email via Gmail SMTP with retry logic
 def send_email_via_resend(to_email, subject, html_body, text_body=""):
-    """Send transactional email via Resend API with exponential backoff retry. Non-fatal — logs error if it fails."""
-    # Read env vars at call time, not module import time — Lambda may not have
-    # injected them yet when the module is first loaded during a cold start.
-    resend_api_key = os.environ.get("RESEND_API_KEY", "")
-    resend_from    = os.environ.get("RESEND_FROM", "MyStore <onboarding@resend.dev>")
+    """Send transactional email via Gmail SMTP. Non-fatal — logs error if it fails."""
+    import smtplib
+    import time
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
 
-    if not resend_api_key:
-        # No API key — log the email content so it's visible in Lambda logs during testing
-        print(f"INFO: RESEND_API_KEY not configured — email not sent.")
+    smtp_user     = os.environ.get("SMTP_USER", "")       # your Gmail address
+    smtp_password = os.environ.get("SMTP_PASSWORD", "")   # Gmail App Password
+    smtp_from     = os.environ.get("SMTP_FROM", smtp_user) # display name + address
+
+    if not smtp_user or not smtp_password:
+        print("INFO: SMTP_USER / SMTP_PASSWORD not configured — email not sent.")
         print(f"  TO:      {to_email}")
         print(f"  SUBJECT: {subject}")
         print(f"  BODY:    {text_body or '(html only)'}")
@@ -71,32 +109,25 @@ def send_email_via_resend(to_email, subject, html_body, text_body=""):
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            payload = json.dumps({
-                "from":    resend_from,
-                "to":      [to_email],
-                "subject": subject,
-                "html":    html_body,
-                "text":    text_body
-            }).encode("utf-8")
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = subject
+            msg["From"]    = smtp_from
+            msg["To"]      = to_email
 
-            req = urllib.request.Request(
-                "https://api.resend.com/emails",
-                data    = payload,
-                headers = {
-                    "Content-Type":  "application/json",
-                    "Authorization": f"Bearer {resend_api_key}"
-                },
-                method = "POST"
-            )
-            with urllib.request.urlopen(req, timeout=10) as res:
-                result = json.loads(res.read())
-                print(f"INFO: Email sent via Resend — id: {result.get('id')}")
-                return  # Success, exit
+            if text_body:
+                msg.attach(MIMEText(text_body, "plain"))
+            msg.attach(MIMEText(html_body, "html"))
+
+            with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=10) as server:
+                server.login(smtp_user, smtp_password)
+                server.sendmail(smtp_user, to_email, msg.as_string())
+
+            print(f"INFO: Email sent via Gmail SMTP to {to_email} — {subject}")
+            return  # success
         except Exception as e:
-            print(f"ERROR sending email via Resend (attempt {attempt + 1}/{max_retries}): {str(e)}")
+            print(f"ERROR sending email via Gmail SMTP (attempt {attempt + 1}/{max_retries}): {str(e)}")
             if attempt < max_retries - 1:
-                import time
-                time.sleep(2 ** attempt)  # Exponential backoff: 1s, 2s, 4s
+                time.sleep(2 ** attempt)  # exponential backoff: 1s, 2s
             else:
                 print(f"ERROR: Failed to send email after {max_retries} attempts")
 
@@ -105,8 +136,7 @@ def send_email_via_resend(to_email, subject, html_body, text_body=""):
 def fetch_product(product_id):
     """Fetch a single product by ID from DynamoDB."""
     try:
-        product_table = boto3.resource("dynamodb").Table("products_table_guru")
-        result = product_table.get_item(Key={"id": str(product_id)})
+        result = boto3.resource("dynamodb").Table(get_table_name("products")).get_item(Key={"id": str(product_id)})
         item   = result.get("Item")
         return convert_decimal(item) if item else None
     except Exception as e:
@@ -170,10 +200,27 @@ def get_user_email(event):
         claims = event['requestContext']['authorizer']['jwt']['claims']
         # Auth0 puts email in a custom namespaced claim on access tokens.
         # The standard 'email' claim is only present on ID tokens.
-        return (
-            claims.get('https://mystore.com/email') or
-            claims.get('email') or
-            ''
-        )
+        # Guard against non-string values (e.g. boolean True from a misconfigured Action)
+        for key in ('https://mystore.com/email', 'email'):
+            val = claims.get(key)
+            if val and isinstance(val, str):
+                return val
+        return ''
     except (KeyError, AttributeError):
         return None
+
+
+# 🔹 Extract email_verified flag from Auth0 JWT Authorizer
+def get_email_verified(event):
+    try:
+        claims = event['requestContext']['authorizer']['jwt']['claims']
+        verified = claims.get('https://mystore.com/email_verified')
+        if verified is None:
+            # Claim not present — Auth0 Action not yet updated, allow emails through
+            return True
+        # JWT claims come through as strings
+        if isinstance(verified, str):
+            return verified.lower() == 'true'
+        return bool(verified)
+    except (KeyError, AttributeError):
+        return True  # fail open — don't block emails on missing claim

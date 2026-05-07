@@ -4,12 +4,12 @@ import os
 import boto3
 import urllib.request
 import base64
-from utils import response, send_email_via_resend, publish_sns_notification
+from utils import response, send_email_via_resend, publish_sns_notification, update_order_status, get_table_name
 from validation import validate
 
 # Lazy-load tables for testability
 def get_orders_table():
-    return boto3.resource("dynamodb").Table("orders_table_guru")
+    return boto3.resource("dynamodb").Table(get_table_name("orders"))
 
 def get_sqs_client():
     return boto3.client("sqs")
@@ -117,36 +117,6 @@ def verify_razorpay_payment(razorpay_order_id, razorpay_payment_id, razorpay_sig
     return hmac.compare_digest(expected, razorpay_signature)
 
 
-def update_order_status(order_id, status, message=None):
-    """Update order status and add to status history."""
-    try:
-        from datetime import datetime
-        
-        timestamp = datetime.utcnow().isoformat() + "Z"
-        history_entry = {
-            "status": status,
-            "timestamp": timestamp,
-            "message": message or f"Order status changed to {status}"
-        }
-        
-        get_orders_table().update_item(
-            Key={"order_id": order_id},
-            UpdateExpression="SET #s = :status, #h = list_append(if_not_exists(#h, :empty_list), :history)",
-            ExpressionAttributeNames={
-                "#s": "status",
-                "#h": "status_history"
-            },
-            ExpressionAttributeValues={
-                ":status": status,
-                ":history": [history_entry],
-                ":empty_list": []
-            }
-        )
-        print(f"INFO: Order {order_id} status updated to {status}")
-    except Exception as e:
-        print(f"ERROR updating order status: {str(e)}")
-
-
 def send_order_to_fulfillment_queue(order_id):
     """Trigger async fulfillment (shipped status) only after payment succeeds."""
     try:
@@ -163,37 +133,38 @@ def send_order_to_fulfillment_queue(order_id):
 
 
 def publish_payment_notification(order_id, payment_status, order=None, decline_code=None):
-    name           = order.get('address', {}).get('full_name', 'there') if order else 'there'
-    grand_total    = int(order.get('grand_total', 0)) if order else 0
-    customer_email = order.get('user_email', '') if order else ''
-    order_ref      = order_id[:8].upper()
+    try:
+        name           = order.get('address', {}).get('full_name', 'there') if order else 'there'
+        grand_total    = int(order.get('grand_total', 0)) if order else 0
+        customer_email = order.get('user_email', '') if order else ''
+        order_ref      = order_id[:8].upper()
 
-    # SNS (admin)
-    subject = f"Payment {'Confirmed' if payment_status=='success' else 'Failed'}: #{order_ref}"
-    msg     = f"Order #{order_ref} — {name} ({customer_email}) — ₹{grand_total:,} — {payment_status}"
-    if decline_code:
-        msg += f" — {decline_code}"
-    publish_sns_notification(subject=subject, message=msg)
+        # SNS (admin)
+        subject = f"Payment {'Confirmed' if payment_status=='success' else 'Failed'}: #{order_ref}"
+        msg     = f"Order #{order_ref} — {name} ({customer_email}) — ₹{grand_total:,} — {payment_status}"
+        if decline_code:
+            msg += f" — {decline_code}"
+        publish_sns_notification(subject=subject, message=msg)
 
-    # Resend (customer)
-    if payment_status == 'success':
-        send_email_via_resend(
-            to_email  = customer_email,
-            subject   = f"Payment Confirmed — #{order_ref} | MyStore",
-            html_body = f"""<div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
+        # Resend (customer)
+        if payment_status == 'success':
+            send_email_via_resend(
+                to_email  = customer_email,
+                subject   = f"Payment Confirmed — #{order_ref} | MyStore",
+                html_body = f"""<div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
 <h2 style="color:#10b981">✅ Payment Confirmed</h2>
 <p>Hi <strong>{name}</strong>, your payment of <strong>₹{grand_total:,}</strong> for order <strong>#{order_ref}</strong> was successful.</p>
 <p>Your order is being processed and will be shipped soon.</p>
 <hr style="border:none;border-top:1px solid #eee;margin:24px 0"/>
 <p style="font-size:0.8rem;color:#999">MyStore · This is an automated email.</p>
 </div>""",
-            text_body = f"Hi {name}, payment of ₹{grand_total:,} for order #{order_ref} confirmed. Your order is being processed."
-        )
-    else:
-        send_email_via_resend(
-            to_email  = customer_email,
-            subject   = f"Payment Failed — #{order_ref} | MyStore",
-            html_body = f"""<div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
+                text_body = f"Hi {name}, payment of ₹{grand_total:,} for order #{order_ref} confirmed. Your order is being processed."
+            )
+        else:
+            send_email_via_resend(
+                to_email  = customer_email,
+                subject   = f"Payment Failed — #{order_ref} | MyStore",
+                html_body = f"""<div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
 <h2 style="color:#ef4444">❌ Payment Failed</h2>
 <p>Hi <strong>{name}</strong>, we could not process your payment for order <strong>#{order_ref}</strong>.</p>
 <p><strong>Reason:</strong> {decline_code or 'Payment declined'}</p>
@@ -201,8 +172,11 @@ def publish_payment_notification(order_id, payment_status, order=None, decline_c
 <hr style="border:none;border-top:1px solid #eee;margin:24px 0"/>
 <p style="font-size:0.8rem;color:#999">MyStore · This is an automated email.</p>
 </div>""",
-            text_body = f"Hi {name}, payment for order #{order_ref} failed. Reason: {decline_code or 'declined'}. Please try again."
-        )
+                text_body = f"Hi {name}, payment for order #{order_ref} failed. Reason: {decline_code or 'declined'}. Please try again."
+            )
+    except Exception as e:
+        # Notification failure must never crash the payment handler
+        print(f"WARN: Failed to send payment notification for {order_id}: {str(e)}")
 
 
 def process_payment(order_id, amount, order):
@@ -358,11 +332,15 @@ def lambda_handler(event, context):
 
             if success:
                 update_order_status(order_id, "paid")
-                publish_payment_notification(order_id, "success", order=order)
+                if order.get("email_verified", True):
+                    publish_payment_notification(order_id, "success", order=order)
+                else:
+                    print(f"WARN: Skipping payment confirmation email for order {order_id} — email not verified")
                 send_order_to_fulfillment_queue(order_id)
                 return response(200, data=payment, message=message)
             else:
-                publish_payment_notification(order_id, "failed", order=order, decline_code=decline_code)
+                if order.get("email_verified", True):
+                    publish_payment_notification(order_id, "failed", order=order, decline_code=decline_code)
                 return response(400, data=payment, message=message)
 
         # 🔹 Invalid route

@@ -3,8 +3,8 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'services'))
 
 os.environ['AWS_DEFAULT_REGION'] = 'us-east-1'
-os.environ['RESEND_API_KEY'] = 'test-key'
-os.environ['RESEND_FROM'] = 'test@example.com'
+os.environ['SMTP_USER'] = ''
+os.environ['SMTP_PASSWORD'] = ''
 
 import pytest
 import boto3
@@ -213,20 +213,19 @@ class TestPaymentService:
         assert 'order_id is required' in data['message']
 
     def test_payment_updates_order_status(self):
-        """Test that successful payment updates order status to 'paid'."""
+        """Test that successful payment updates order status to 'paid' and records history."""
         event = {
             'rawPath': '/payment',
             'requestContext': {'http': {'method': 'POST'}},
-            'body': json.dumps({
-                'order_id': self.test_order_id,
-                'amount': 285
-            })
+            'body': json.dumps({'order_id': self.test_order_id, 'amount': 285})
         }
         lambda_handler(event, {})
 
-        # Check order status was updated
         order = self.orders_table.get_item(Key={'order_id': self.test_order_id})['Item']
         assert order['status'] == 'paid'
+        # status_history should be written by the unified update_order_status
+        assert 'status_history' in order
+        assert order['status_history'][0]['status'] == 'paid'
 
     def test_payment_amount_below_minimum(self):
         """Test that payments below minimum amount are rejected."""

@@ -6,8 +6,8 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'services'))
 
 os.environ['AWS_DEFAULT_REGION'] = 'us-east-1'
-os.environ['RESEND_API_KEY'] = 'test-key'
-os.environ['RESEND_FROM'] = 'test@example.com'
+os.environ['SMTP_USER'] = ''
+os.environ['SMTP_PASSWORD'] = ''
 
 import pytest
 import json

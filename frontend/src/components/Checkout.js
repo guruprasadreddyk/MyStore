@@ -31,7 +31,7 @@ const INDIAN_STATES = [
 const EMPTY = { full_name: '', phone: '', address_line1: '', address_line2: '', city: '', state: '', pincode: '' };
 
 function Checkout({ cart, onConfirm, onCancel, loading, addToast }) {
-  const { isAuthenticated, getAccessTokenSilently } = useAuth0();
+  const { isAuthenticated, getAccessTokenSilently, user } = useAuth0();
   const [savedAddresses, setSavedAddresses] = useState([]);
   const [selectedId, setSelectedId]         = useState(null); // null = new address form
   const [address, setAddress]               = useState(EMPTY);
@@ -109,7 +109,11 @@ function Checkout({ cart, onConfirm, onCancel, loading, addToast }) {
       // Get auth headers once — reuse for both order creation and payment
       // to avoid a second getAccessTokenSilently() call that Edge may block
       const headers = await getHeaders(isAuthenticated, getAccessTokenSilently);
-      const items = cart.map((item) => ({ id: item.id }));
+      const items = cart.map((item) => {
+        const entry = { id: item.id };
+        if (item.variant_id) entry.variant_id = item.variant_id;
+        return entry;
+      });
 
       const orderRes = await apiFetch('/order', {
         method: 'POST',
@@ -118,7 +122,7 @@ function Checkout({ cart, onConfirm, onCancel, loading, addToast }) {
       });
 
       if (orderRes.status === 'success' && orderRes.data) {
-        setTimeout(() => handlePayment(orderRes.data.order_id, headers), 500);
+        handlePayment(orderRes.data.order_id, headers);
       } else {
         addToast(orderRes.message || 'Failed to create order', 'error');
       }
@@ -338,6 +342,28 @@ function Checkout({ cart, onConfirm, onCancel, loading, addToast }) {
             <p style={{ fontSize: '0.75rem', opacity: 0.5, marginBottom: '16px' }}>
               Add {fmt(500 - subtotal)} more for free delivery
             </p>
+          )}
+
+          {/* Email verification warning */}
+          {isAuthenticated && !user?.email_verified && (
+            <div style={{
+              padding: '10px 14px',
+              marginBottom: '14px',
+              background: 'rgba(245,158,11,0.1)',
+              border: '1px solid rgba(245,158,11,0.35)',
+              borderRadius: '8px',
+              fontSize: '0.8rem',
+              color: '#fbbf24',
+              lineHeight: 1.5,
+            }}>
+              ⚠️ Your email is not verified. You won't receive an order confirmation or shipping updates for this order.{' '}
+              <span
+                onClick={() => window.location.href = '/profile'}
+                style={{ textDecoration: 'underline', cursor: 'pointer', fontWeight: 600 }}
+              >
+                Verify now
+              </span>
+            </div>
           )}
 
           <button className="btn-primary" onClick={handleSubmit} disabled={loading}

@@ -54,10 +54,12 @@ export const getHeaders = async (isAuthenticated, getAccessTokenSilently) => {
   }
 
   try {
-    const token = await getAccessTokenSilently();
+    const token = await getAccessTokenSilently({
+      cacheMode: 'on', // prefer cache, avoid silent iframe (blocked by tracking prevention)
+    });
     headers.Authorization = `Bearer ${token}`;
   } catch (error) {
-    console.error('Error getting access token', error);
+    console.error('Error getting access token — request will proceed without auth:', error);
   }
 
   return headers;

@@ -51,7 +51,7 @@ function Cart({ cart, loading, addToCart, removeFromCart, onCheckout, cartTotal,
                         {item.quantity}
                       </span>
                       <button
-                        onClick={() => addToCart(item.id)}
+                        onClick={() => addToCart(item.id, item.variant_id || null)}
                         disabled={loading}
                         style={{
                           width: '30px', height: '30px', border: '1px solid rgba(255,255,255,0.2)',

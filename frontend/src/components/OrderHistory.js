@@ -15,6 +15,12 @@ const STATUS_COLORS = {
 
 const fmt = (n) => `₹${Number(n).toLocaleString('en-IN')}`;
 
+const selectStyle = {
+  padding: '8px 12px', borderRadius: '8px', fontSize: '0.85rem',
+  background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)',
+  color: '#fff', cursor: 'pointer', width: '100%',
+};
+
 const REVIEWABLE_STATUSES = new Set(['delivered', 'shipped']);
 
 // ── Star rating widget ────────────────────────────────────────────────────────
@@ -166,6 +172,28 @@ function OrderHistory({ orders, loading, processPayment, cancelOrder, requestRet
   const [reviewedItems, setReviewedItems] = useState(new Set());
   const [reviewMessage, setReviewMessage] = useState({ id: null, text: '', ok: true });
 
+  // ── Filters ───────────────────────────────────────────────────────────────
+  const [filterStatus, setFilterStatus] = useState('all');
+  const [filterDate,   setFilterDate]   = useState('all'); // all | 30 | 90 | 180
+  const [sortOrder,    setSortOrder]    = useState('newest');
+
+  const filteredOrders = orders
+    .filter(o => {
+      if (filterStatus !== 'all' && o.status !== filterStatus) return false;
+      if (filterDate !== 'all') {
+        const days = parseInt(filterDate, 10);
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - days);
+        if (new Date(o.created_at) < cutoff) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      const ta = new Date(a.created_at).getTime();
+      const tb = new Date(b.created_at).getTime();
+      return sortOrder === 'newest' ? tb - ta : ta - tb;
+    });
+
   if (loading) return <div style={{ padding: '40px', opacity: 0.5 }}>Loading orders…</div>;
 
   const handleSubmitReview = async (productId, formData) => {
@@ -192,11 +220,88 @@ function OrderHistory({ orders, loading, processPayment, cancelOrder, requestRet
     <div className="orders" style={{ maxWidth: '800px', margin: '0 auto', padding: '32px 24px' }}>
       <h2 style={{ marginBottom: '24px' }}>Your Orders</h2>
 
-      {orders.length === 0 ? (
-        <p style={{ opacity: 0.5 }}>No orders yet. Start shopping!</p>
+      {/* ── Filter bar ──────────────────────────────────────────────────── */}
+      {orders.length > 0 && (
+        <div style={{
+          display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '24px',
+          padding: '16px', background: 'rgba(255,255,255,0.03)',
+          border: '1px solid rgba(255,255,255,0.07)', borderRadius: '12px',
+        }}>
+          {/* Status filter */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '1 1 160px' }}>
+            <label style={{ fontSize: '0.72rem', opacity: 0.5, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Status</label>
+            <select
+              value={filterStatus}
+              onChange={e => setFilterStatus(e.target.value)}
+              style={selectStyle}
+            >
+              <option value="all">All statuses</option>
+              <option value="created">Created</option>
+              <option value="paid">Paid</option>
+              <option value="shipped">Shipped</option>
+              <option value="delivered">Delivered</option>
+              <option value="cancelled">Cancelled</option>
+              <option value="return_pending">Return Pending</option>
+              <option value="refunded">Refunded</option>
+            </select>
+          </div>
+
+          {/* Date range filter */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '1 1 160px' }}>
+            <label style={{ fontSize: '0.72rem', opacity: 0.5, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Date Range</label>
+            <select
+              value={filterDate}
+              onChange={e => setFilterDate(e.target.value)}
+              style={selectStyle}
+            >
+              <option value="all">All time</option>
+              <option value="30">Last 30 days</option>
+              <option value="90">Last 90 days</option>
+              <option value="180">Last 6 months</option>
+            </select>
+          </div>
+
+          {/* Sort */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '1 1 160px' }}>
+            <label style={{ fontSize: '0.72rem', opacity: 0.5, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Sort By</label>
+            <select
+              value={sortOrder}
+              onChange={e => setSortOrder(e.target.value)}
+              style={selectStyle}
+            >
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+            </select>
+          </div>
+
+          {/* Result count + clear */}
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px', flex: '0 0 auto' }}>
+            <span style={{ fontSize: '0.8rem', opacity: 0.45, paddingBottom: '2px' }}>
+              {filteredOrders.length} of {orders.length}
+            </span>
+            {(filterStatus !== 'all' || filterDate !== 'all' || sortOrder !== 'newest') && (
+              <button
+                onClick={() => { setFilterStatus('all'); setFilterDate('all'); setSortOrder('newest'); }}
+                style={{
+                  padding: '6px 12px', fontSize: '0.78rem', background: 'rgba(239,68,68,0.1)',
+                  border: '1px solid rgba(239,68,68,0.3)', borderRadius: '6px',
+                  color: '#ef4444', cursor: 'pointer',
+                }}
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {filteredOrders.length === 0 ? (
+        <p style={{ opacity: 0.5 }}>
+          {orders.length === 0 ? 'No orders yet. Start shopping!' : 'No orders match the selected filters.'}
+        </p>
       ) : (
         <div className="order-list" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {orders.map(order => {
+          {filteredOrders.map(order => {
             const subtotal       = order.subtotal       ?? order.items.reduce((s, i) => s + i.price * i.quantity, 0);
             const deliveryCharge = order.delivery_charge ?? (subtotal >= 500 ? 0 : 49);
             const gst            = order.gst            ?? Math.round(subtotal * 0.18);
@@ -217,7 +322,7 @@ function OrderHistory({ orders, loading, processPayment, cancelOrder, requestRet
                 >
                   <div>
                     <p style={{ fontSize: '0.75rem', opacity: 0.5, marginBottom: '4px' }}>
-                      Order #{order.order_id?.slice(0, 8).toUpperCase()}
+                      Order #{order.order_id?.slice(0, 8).toUpperCase()} · {new Date(order.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
                     </p>
                     <p style={{ fontWeight: 600 }}>{fmt(grandTotal)}</p>
                   </div>

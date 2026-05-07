@@ -14,18 +14,18 @@ import time
 import urllib.request
 import boto3
 from decimal import Decimal
-from utils import response, send_email_via_resend
+from utils import response, send_email_via_resend, fetch_product, convert_decimal, get_user_id, get_table_name
 from validation import validate
 
 # Lazy-load tables for testability
 def get_cart_table():
-    return boto3.resource("dynamodb").Table('cart_table_guru')
+    return boto3.resource("dynamodb").Table(get_table_name("cart"))
 
 def get_wishlist_table():
-    return boto3.resource("dynamodb").Table('wishlist_table_guru')
+    return boto3.resource("dynamodb").Table(get_table_name("wishlist"))
 
 def get_user_data_table():
-    return boto3.resource("dynamodb").Table('user_data_table_guru')
+    return boto3.resource("dynamodb").Table(get_table_name("user_data"))
 
 CART_TTL_SECONDS = 7 * 24 * 60 * 60
 
@@ -85,11 +85,6 @@ def update_auth0_name(user_id, name):
     )
     with urllib.request.urlopen(req, timeout=10) as res:
         return json.loads(res.read())
-
-
-# ─── Product fetch ────────────────────────────────────────────────────────────
-
-from utils import fetch_product, convert_decimal, get_user_id
 
 
 # ─── Cart helpers ─────────────────────────────────────────────────────────────

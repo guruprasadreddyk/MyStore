@@ -3,6 +3,15 @@ import ProductCard from './ProductCard';
 import './Wishlist.css';
 
 function Wishlist({ wishlist, toggleWishlist, addToCart, loading, onQuickView }) {
+
+  const handleMoveToCart = async (product, variantId = null) => {
+    const result = await addToCart(product.id, variantId);
+    // Only remove from wishlist if the cart add succeeded
+    if (result && result.status === 'success') {
+      await toggleWishlist(product);
+    }
+  };
+
   return (
     <div className="wishlist-page fade-in-up" style={{ padding: '40px 20px', maxWidth: '1400px', margin: '0 auto' }}>
       <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '2.5rem', marginBottom: '24px' }}>My Wishlist</h2>
@@ -17,10 +26,11 @@ function Wishlist({ wishlist, toggleWishlist, addToCart, loading, onQuickView })
             <ProductCard
               key={product.id}
               product={product}
-              addToCart={addToCart}
+              addToCart={(id, variantId) => handleMoveToCart(product, variantId)}
               loading={loading}
               toggleWishlist={toggleWishlist}
               isWishlisted={true}
+              isWishlistPage={true}
               index={0}
               onQuickView={onQuickView}
             />

@@ -12,7 +12,7 @@ const getVariantLabel = (variant) => {
   return parts.length > 0 ? parts.join(' - ') : 'Standard';
 };
 
-function ProductCard({ product, addToCart, loading, toggleWishlist, isWishlisted, index, onQuickView }) {
+function ProductCard({ product, addToCart, loading, toggleWishlist, isWishlisted, isWishlistPage, index, onQuickView }) {
   const [selectedVariant, setSelectedVariant] = useState(null);
   const [showVariantSelector, setShowVariantSelector] = useState(false);
 
@@ -144,7 +144,11 @@ function ProductCard({ product, addToCart, loading, toggleWishlist, isWishlisted
           disabled={loading || product.stock_quantity === 0}
           style={{ flex: 1 }}
         >
-          {product.stock_quantity === 0 ? 'Out of Stock' : 'Add to Cart'}
+          {product.stock_quantity === 0
+            ? 'Out of Stock'
+            : isWishlistPage
+            ? '🛒 Move to Cart'
+            : 'Add to Cart'}
         </button>
       </div>
     </div>

@@ -3,8 +3,8 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'services'))
 
 os.environ['AWS_DEFAULT_REGION'] = 'us-east-1'
-os.environ['RESEND_API_KEY'] = 'test-key'
-os.environ['RESEND_FROM'] = 'test@example.com'
+os.environ['SMTP_USER'] = ''
+os.environ['SMTP_PASSWORD'] = ''
 
 import pytest
 import boto3
@@ -293,3 +293,52 @@ class TestOrderService:
         response = lambda_handler(create_order_event('/invalid', 'GET'), {})
         assert response['statusCode'] == 404
         assert 'Route not found' in json.loads(response['body'])['message']
+
+    def test_create_order_unverified_email_still_succeeds(self):
+        """Order creation should succeed even with unverified email."""
+        event = {
+            'rawPath': '/order',
+            'requestContext': {
+                'http': {'method': 'POST'},
+                'authorizer': {'jwt': {'claims': {
+                    'sub': 'user1',
+                    'email': 'user@example.com',
+                    'https://mystore.com/email_verified': 'false'
+                }}}
+            },
+            'body': json.dumps({'items': [{'id': '1'}], 'address': VALID_ADDRESS})
+        }
+        response = lambda_handler(event, {})
+        assert response['statusCode'] == 200
+        data = json.loads(response['body'])
+        assert data['status'] == 'success'
+        # email_verified flag stored on the order
+        assert data['data']['email_verified'] is False
+
+    def test_create_order_verified_email_stored(self):
+        """email_verified=True should be stored on the order."""
+        event = {
+            'rawPath': '/order',
+            'requestContext': {
+                'http': {'method': 'POST'},
+                'authorizer': {'jwt': {'claims': {
+                    'sub': 'user1',
+                    'email': 'user@example.com',
+                    'https://mystore.com/email_verified': 'true'
+                }}}
+            },
+            'body': json.dumps({'items': [{'id': '1'}], 'address': VALID_ADDRESS})
+        }
+        response = lambda_handler(event, {})
+        assert response['statusCode'] == 200
+        data = json.loads(response['body'])
+        assert data['data']['email_verified'] is True
+
+    def test_create_order_missing_verified_claim_defaults_true(self):
+        """Missing email_verified claim should default to True (fail open)."""
+        response = lambda_handler(create_order_event('/order', 'POST', body={
+            'items': [{'id': '1'}], 'address': VALID_ADDRESS
+        }), {})
+        assert response['statusCode'] == 200
+        data = json.loads(response['body'])
+        assert data['data']['email_verified'] is True

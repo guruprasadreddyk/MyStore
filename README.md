@@ -13,9 +13,10 @@ A full-stack serverless e-commerce platform built with React, AWS Lambda, Dynamo
 - **Payment Processing** - Razorpay integration with fallback simulation mode
 - **Product Reviews** - Rate and review products (verified purchase only)
 - **Return Management** - Request, approve, reject, and refund returns
-- **Recommendations** - AI-powered product recommendations based on cart/wishlist
-- **Email Notifications** - Transactional emails via Resend API
 - **Admin Panel** - Manage products, orders, returns, and inventory with analytics dashboard
+- **Email Notifications** - Transactional emails via Gmail SMTP (verified users only)
+- **Order History Filters** - Filter orders by status, date range, and sort order
+- **Email Verification Reminders** - Banner and checkout warning for unverified users
 
 ## 🛠️ Tech Stack
 
@@ -41,7 +42,7 @@ A full-stack serverless e-commerce platform built with React, AWS Lambda, Dynamo
 ### Third-Party Services
 - **Auth0** - User authentication and authorization
 - **Razorpay** - Payment gateway (Indian market)
-- **Resend** - Transactional email delivery
+- **Gmail SMTP** - Transactional email delivery (App Password, verified users only)
 
 ## 📋 Prerequisites
 
@@ -51,7 +52,7 @@ A full-stack serverless e-commerce platform built with React, AWS Lambda, Dynamo
 - **AWS CLI** configured with appropriate credentials
 - **Auth0 account** with API configured
 - **Razorpay account** (optional, falls back to simulation)
-- **Resend API key** (optional, for email notifications)
+- **Gmail account** with App Password (optional, for email notifications)
 
 ## ⚡ Quick Start
 
@@ -76,8 +77,9 @@ auth0_m2m_client_id     = "your-m2m-client-id"
 auth0_m2m_client_secret = "your-m2m-client-secret"
 razorpay_key_id         = "your-razorpay-key-id"
 razorpay_key_secret     = "your-razorpay-key-secret"
-resend_api_key          = "your-resend-api-key"
-resend_from_email       = "MyStore <noreply@yourdomain.com>"
+smtp_user               = "yourstore@gmail.com"          # optional
+smtp_password           = "xxxx xxxx xxxx xxxx"          # Gmail App Password
+smtp_from               = "MyStore <yourstore@gmail.com>"
 ```
 
 ### 3. Deploy infrastructure
@@ -120,7 +122,16 @@ cd ../scripts
 3. Set **Allowed Logout URLs**: `http://localhost:3000, https://your-cloudfront-url`
 4. Set **Allowed Web Origins**: `http://localhost:3000, https://your-cloudfront-url`
 5. Create an API with identifier: `https://api.mystore.com`
-6. Update `frontend/src/index.js` with your Auth0 domain and client ID
+6. Create a **Post-Login Action** with the following code and add it to the Login flow:
+   ```javascript
+   exports.onExecutePostLogin = async (event, api) => {
+     const ns = 'https://mystore.com/';
+     api.accessToken.setCustomClaim(ns + 'email', event.user.email);
+     api.accessToken.setCustomClaim(ns + 'email_verified', event.user.email_verified);
+     api.accessToken.setCustomClaim(ns + 'roles', event.authorization?.roles || []);
+   };
+   ```
+7. Update `frontend/src/index.js` with your Auth0 domain and client ID
 
 ### 7. Access the application
 
@@ -144,7 +155,7 @@ cd ../scripts
 │   ├── user_service.py      # User profile, cart & wishlist
 │   ├── admin_service.py     # Admin operations & analytics
 │   ├── order_processor.py   # SQS order fulfillment
-│   ├── utils.py             # Shared utilities (email, SNS, order status)
+│   ├── utils.py             # Shared utilities (Gmail SMTP, SNS, order status, table names)
 │   └── validation.py        # Input validation (no external dependencies)
 ├── infrastructure/          # Terraform IaC
 │   ├── main.tf             # Provider configuration
@@ -239,12 +250,10 @@ python -m pytest tests/test_catalog_service.py -v
 - [ ] Configure backup retention policies
 - [ ] Set up monitoring dashboards
 - [ ] Test payment flow with real Razorpay credentials
-- [ ] Configure email templates in Resend
+- [ ] Configure Gmail App Password and verify SMTP sends
 - [ ] Review and adjust Lambda memory/timeout settings
 - [ ] Enable API Gateway access logging
 - [ ] Set up WAF rules for API protection
-
-See [Deployment Guide](docs/DEPLOYMENT.md) for detailed instructions.
 
 ## 📖 Documentation
 
@@ -296,14 +305,14 @@ This project is licensed under the MIT License.
 - Auth0 for authentication infrastructure
 - AWS for serverless platform
 - Razorpay for payment processing
-- Resend for email delivery
+- Gmail SMTP for email delivery
 - Picsum Photos for placeholder images
 
 ## 📧 Support
 
 For issues and questions:
 - Create an issue in the repository
-- Email: support@mystore.com
+- Email: updates.mystore@gmail.com
 
 ---
 

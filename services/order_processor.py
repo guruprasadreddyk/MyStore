@@ -1,11 +1,11 @@
 import json
 import boto3
 import os
-from utils import convert_decimal, send_email_via_resend, publish_sns_notification
+from utils import convert_decimal, send_email_via_resend, publish_sns_notification, get_table_name
 
 # Lazy-load tables for testability
 def get_orders_table():
-    return boto3.resource("dynamodb").Table("orders_table_guru")
+    return boto3.resource("dynamodb").Table(get_table_name("orders"))
 
 
 def publish_shipping_notification(order):
@@ -67,7 +67,10 @@ def lambda_handler(event, context):
 
             # Send shipping notification (non-fatal if it fails)
             try:
-                publish_shipping_notification(order)
+                if order.get("email_verified", True):
+                    publish_shipping_notification(order)
+                else:
+                    print(f"INFO: Skipping shipping email for order {order_id} — email not verified")
             except Exception as e:
                 print(f"ERROR sending shipping notification for {order_id}: {str(e)}")
 

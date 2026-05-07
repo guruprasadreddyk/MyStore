@@ -36,6 +36,7 @@ resource "aws_lambda_function" "function" {
   role             = aws_iam_role.lambda_role.arn
   filename         = each.value.filename
   source_code_hash = filebase64sha256(each.value.filename)
+  timeout          = 30
 
   # Common env vars for all functions
   environment {
@@ -44,8 +45,9 @@ resource "aws_lambda_function" "function" {
         SQS_QUEUE_NAME = var.sqs_queue_name
         SNS_TOPIC_NAME = var.sns_topic_name
         AWS_REGION_NAME = var.aws_region
-        RESEND_API_KEY = var.resend_api_key
-        RESEND_FROM = var.resend_from_email
+        SMTP_USER     = var.smtp_user
+        SMTP_PASSWORD = var.smtp_password
+        SMTP_FROM     = var.smtp_from
       },
       # Auth0 M2M credentials — only injected into user_service
       each.key == "user" ? {

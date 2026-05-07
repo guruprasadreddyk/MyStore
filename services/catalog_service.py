@@ -5,14 +5,14 @@ from decimal import Decimal
 from datetime import datetime
 from boto3.dynamodb.conditions import Attr, Key
 import os
-from utils import convert_decimal, response
+from utils import convert_decimal, response, get_table_name
 
 # ─── DynamoDB setup (lazy-loaded for testability) ────────────────────────────
 def get_product_table():
-    return boto3.resource("dynamodb").Table("products_table_guru")
+    return boto3.resource("dynamodb").Table(get_table_name("products"))
 
 def get_reviews_table():
-    return boto3.resource("dynamodb").Table("reviews_table_guru")
+    return boto3.resource("dynamodb").Table(get_table_name("reviews"))
 
 
 # ─── Product helpers ──────────────────────────────────────────────────────────
@@ -87,24 +87,49 @@ def get_all_products(limit=10, last_key=None, min_price=None, max_price=None, ca
 
 def get_product_recommendations(product_ids, limit=5):
     try:
-        selected, categories, avg_price = [], set(), 0
+        if not product_ids:
+            return []
 
-        for pid in product_ids:
-            p = get_product_by_id(pid)
-            if p:
-                selected.append(p)
-                categories.add(p.get("category", ""))
-                avg_price += float(p.get("price", 0))
+        # Batch-fetch all requested products in one DynamoDB call
+        product_ids_str = [str(pid) for pid in product_ids]
+        table_name = get_table_name("products")
+        batch_result = boto3.resource("dynamodb").batch_get_item(
+            RequestItems={
+                table_name: {
+                    "Keys": [{"id": pid} for pid in product_ids_str]
+                }
+            }
+        )
+        fetched = batch_result.get("Responses", {}).get(table_name, [])
+
+        selected, categories, avg_price = [], set(), 0
+        for p in fetched:
+            p = convert_decimal(p)
+            selected.append(p)
+            categories.add(p.get("category", ""))
+            avg_price += float(p.get("price", 0))
 
         if not selected:
             return []
 
         avg_price /= len(selected)
 
-        all_items = get_product_table().scan().get("Items", [])
+        # Paginate the scan to avoid truncation on large tables
+        all_items = []
+        scan_kwargs = {}
+        while True:
+            page = get_product_table().scan(**scan_kwargs)
+            all_items.extend(page.get("Items", []))
+            last_key = page.get("LastEvaluatedKey")
+            if not last_key:
+                break
+            scan_kwargs["ExclusiveStartKey"] = last_key
+
+        # Normalise product_ids to strings for safe membership check
+        product_ids_set = {str(pid) for pid in product_ids}
         recs = []
         for p in all_items:
-            if p.get("id") not in product_ids:
+            if str(p.get("id", "")) not in product_ids_set:
                 score = 0
                 if p.get("category", "") in categories:
                     score += 10
@@ -262,7 +287,7 @@ def get_user_review_for_product(user_id, product_id):
 def has_user_ordered_product(user_id, product_id):
     """Check if user has ordered and received this product."""
     try:
-        orders_table = boto3.resource("dynamodb").Table("orders_table_guru")
+        orders_table = boto3.resource("dynamodb").Table(get_table_name("orders"))
         
         # Query orders by user_id
         result = orders_table.query(
@@ -542,9 +567,12 @@ def lambda_handler(event, context):
         if path == "/recommendations" and method == "GET":
             qp          = event.get("queryStringParameters") or {}
             product_ids = qp.get("productIds", "")
-            limit       = int(qp.get("limit", 5))
             if not product_ids:
                 return response(400, message="Product IDs are required for recommendations")
+            try:
+                limit = int(qp.get("limit", 5))
+            except (ValueError, TypeError):
+                limit = 5
             try:
                 recs = get_product_recommendations(product_ids.split(","), limit)
                 return response(200, data=recs)

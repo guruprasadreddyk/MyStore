@@ -1,6 +1,27 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth0 } from '@auth0/auth0-react';
-import { API_BASE } from '../services/api';
+import { apiFetch, getHeaders } from '../services/api';
+
+// Defined outside component to avoid re-creation on every render
+function StarRating({ rating, interactive, onChange }) {
+  return (
+    <div style={{ display: 'flex', gap: '4px' }}>
+      {[1, 2, 3, 4, 5].map(star => (
+        <span
+          key={star}
+          onClick={() => interactive && onChange && onChange(star)}
+          style={{
+            fontSize: '1.5rem',
+            color: star <= rating ? '#fbbf24' : '#4b5563',
+            cursor: interactive ? 'pointer' : 'default'
+          }}
+        >
+          ★
+        </span>
+      ))}
+    </div>
+  );
+}
 
 function ProductReviews({ productId }) {
   const { isAuthenticated, getAccessTokenSilently, loginWithRedirect } = useAuth0();
@@ -17,8 +38,7 @@ function ProductReviews({ productId }) {
 
   const loadReviews = async () => {
     try {
-      const res = await fetch(`${API_BASE}/products/${productId}/reviews`);
-      const data = await res.json();
+      const data = await apiFetch(`/products/${productId}/reviews`);
       if (data.status === 'success') {
         setReviews(data.data.reviews || []);
       }
@@ -46,17 +66,12 @@ function ProductReviews({ productId }) {
     setMessage('');
 
     try {
-      const token = await getAccessTokenSilently();
-      const res = await fetch(`${API_BASE}/products/${productId}/reviews`, {
+      const headers = await getHeaders(isAuthenticated, getAccessTokenSilently);
+      const data = await apiFetch(`/products/${productId}/reviews`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify(formData)
+        headers,
+        body: formData,
       });
-
-      const data = await res.json();
       
       if (data.status === 'success') {
         setMessage('Review submitted successfully! ✅');
@@ -76,7 +91,7 @@ function ProductReviews({ productId }) {
 
   const markHelpful = async (reviewId) => {
     try {
-      await fetch(`${API_BASE}/reviews/${reviewId}/helpful`, { method: 'PUT' });
+      await apiFetch(`/reviews/${reviewId}/helpful`, { method: 'PUT' });
       loadReviews();
     } catch (error) {
       console.error('Error marking helpful:', error);
@@ -87,13 +102,11 @@ function ProductReviews({ productId }) {
     if (!window.confirm('Delete this review?')) return;
 
     try {
-      const token = await getAccessTokenSilently();
-      const res = await fetch(`${API_BASE}/reviews/${reviewId}`, {
+      const headers = await getHeaders(isAuthenticated, getAccessTokenSilently);
+      const data = await apiFetch(`/reviews/${reviewId}`, {
         method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
+        headers,
       });
-
-      const data = await res.json();
       if (data.status === 'success') {
         setMessage('Review deleted ✅');
         loadReviews();
@@ -103,25 +116,7 @@ function ProductReviews({ productId }) {
     }
   };
 
-  const StarRating = ({ rating, interactive, onChange }) => {
-    return (
-      <div style={{ display: 'flex', gap: '4px' }}>
-        {[1, 2, 3, 4, 5].map(star => (
-          <span
-            key={star}
-            onClick={() => interactive && onChange && onChange(star)}
-            style={{
-              fontSize: '1.5rem',
-              color: star <= rating ? '#fbbf24' : '#4b5563',
-              cursor: interactive ? 'pointer' : 'default'
-            }}
-          >
-            ★
-          </span>
-        ))}
-      </div>
-    );
-  };
+  // Remove inline StarRating — now defined at module level above
 
   if (loading) return <div style={{ padding: '20px', opacity: 0.5 }}>Loading reviews...</div>;
 

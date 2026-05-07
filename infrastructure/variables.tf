@@ -82,15 +82,22 @@ variable "razorpay_key_secret" {
   sensitive   = true
 }
 
-variable "resend_api_key" {
+variable "smtp_user" {
   type        = string
   default     = ""
-  description = "Resend API key for transactional emails"
+  description = "Gmail address used to send transactional emails"
   sensitive   = true
 }
 
-variable "resend_from_email" {
+variable "smtp_password" {
   type        = string
-  default     = "MyStore <onboarding@resend.dev>"
-  description = "Resend 'from' email address for transactional emails"
+  default     = ""
+  description = "Gmail App Password (not your regular Gmail password)"
+  sensitive   = true
+}
+
+variable "smtp_from" {
+  type        = string
+  default     = ""
+  description = "Display name + address shown in From field, e.g. 'MyStore <you@gmail.com>'"
 }

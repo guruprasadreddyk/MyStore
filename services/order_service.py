@@ -4,21 +4,21 @@ import boto3
 from decimal import Decimal
 from datetime import datetime
 from botocore.exceptions import ClientError
-from utils import convert_decimal, response, get_user_id, get_user_email, send_email_via_resend, fetch_product, publish_sns_notification
+from utils import convert_decimal, response, get_user_id, get_user_email, get_email_verified, send_email_via_resend, fetch_product, publish_sns_notification, get_table_name
 from validation import validate
 
 # Lazy-load tables for testability
 def get_orders_table():
-    return boto3.resource("dynamodb").Table("orders_table_guru")
+    return boto3.resource("dynamodb").Table(get_table_name("orders"))
 
 def get_cart_table():
-    return boto3.resource("dynamodb").Table("cart_table_guru")
+    return boto3.resource("dynamodb").Table(get_table_name("cart"))
 
 def get_product_table():
-    return boto3.resource("dynamodb").Table("products_table_guru")
+    return boto3.resource("dynamodb").Table(get_table_name("products"))
 
 def get_returns_table():
-    return boto3.resource("dynamodb").Table("returns_table_guru")
+    return boto3.resource("dynamodb").Table(get_table_name("returns"))
 
 
 def fetch_cart(user_id):
@@ -119,32 +119,33 @@ def _rollback_inventory(reserved_items):
 
 
 def publish_order_notification(order):
-    customer_email = order.get('user_email', '')
-    name           = order.get('address', {}).get('full_name', 'there')
-    city           = order.get('address', {}).get('city', '')
-    grand_total    = int(order.get('grand_total', 0))
-    order_ref      = order['order_id'][:8].upper()
+    try:
+        customer_email = order.get('user_email', '')
+        name           = order.get('address', {}).get('full_name', 'there')
+        city           = order.get('address', {}).get('city', '')
+        grand_total    = int(order.get('grand_total', 0))
+        order_ref      = order['order_id'][:8].upper()
 
-    # SNS (admin notification)
-    publish_sns_notification(
-        subject=f"Order Confirmed: #{order_ref}",
-        message=f"Order #{order_ref} placed by {name} ({customer_email}). Total: ₹{grand_total:,}"
-    )
+        # SNS (admin notification)
+        publish_sns_notification(
+            subject=f"Order Confirmed: #{order_ref}",
+            message=f"Order #{order_ref} placed by {name} ({customer_email}). Total: ₹{grand_total:,}"
+        )
 
-    # Resend (customer email)
-    items_html = "".join(
-        f"<tr><td style='padding:6px 0;border-bottom:1px solid #eee'>{i['name']}</td>"
-        f"<td style='padding:6px 0;border-bottom:1px solid #eee;text-align:right'>×{i['quantity']}</td>"
-        f"<td style='padding:6px 0;border-bottom:1px solid #eee;text-align:right'>₹{int(i['price']) * int(i['quantity']):,}</td></tr>"
-        for i in order.get('items', [])
-    )
-    subtotal        = int(order.get('subtotal', 0))
-    delivery_charge = int(order.get('delivery_charge', 0))
-    gst             = int(order.get('gst', 0))
-    send_email_via_resend(
-        to_email  = customer_email,
-        subject   = f"Order Confirmed — #{order_ref} | MyStore",
-        html_body = f"""<div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#333">
+        # Resend (customer email)
+        items_html = "".join(
+            f"<tr><td style='padding:6px 0;border-bottom:1px solid #eee'>{i['name']}</td>"
+            f"<td style='padding:6px 0;border-bottom:1px solid #eee;text-align:right'>×{int(i['quantity'])}</td>"
+            f"<td style='padding:6px 0;border-bottom:1px solid #eee;text-align:right'>₹{int(i['price']) * int(i['quantity']):,}</td></tr>"
+            for i in order.get('items', [])
+        )
+        subtotal        = int(order.get('subtotal', 0))
+        delivery_charge = int(order.get('delivery_charge', 0))
+        gst             = int(order.get('gst', 0))
+        send_email_via_resend(
+            to_email  = customer_email,
+            subject   = f"Order Confirmed — #{order_ref} | MyStore",
+            html_body = f"""<div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#333">
 <h2 style="color:#10b981">🛒 Order Confirmed!</h2>
 <p>Hi <strong>{name}</strong>, thank you for your order.</p>
 <p>Order Reference: <strong>#{order_ref}</strong></p>
@@ -166,8 +167,11 @@ def publish_order_notification(order):
 <hr style="border:none;border-top:1px solid #eee;margin:24px 0"/>
 <p style="font-size:0.8rem;color:#999">MyStore · This is an automated email.</p>
 </div>""",
-        text_body = f"Hi {name}, your order #{order_ref} is confirmed. Total: ₹{grand_total:,}. Please pay to confirm."
-    )
+            text_body = f"Hi {name}, your order #{order_ref} is confirmed. Total: ₹{grand_total:,}. Please pay to confirm."
+        )
+    except Exception as e:
+        # Notification failure must never crash the order handler — order is already saved
+        print(f"WARN: Failed to send order notification for {order.get('order_id', 'unknown')}: {str(e)}")
 
 
 # ── Return Management ─────────────────────────────────────────────────────────
@@ -228,16 +232,13 @@ def create_return_request(order_id, user_id, reason):
 
 
 def approve_return(return_id, user_id):
-    """Approve a return request."""
+    """Approve a return request (admin action proxied through order service)."""
     try:
         result = get_returns_table().get_item(Key={"return_id": return_id})
         return_req = result.get("Item")
         
         if not return_req:
             return None, "Return request not found"
-        
-        if return_req.get("user_id") != user_id:
-            return None, "Not authorized"
         
         return_req["status"] = "approved"
         return_req["approved_at"] = datetime.utcnow().isoformat() + "Z"
@@ -338,6 +339,7 @@ def lambda_handler(event, context):
     try:
         user_id    = get_user_id(event)
         user_email = get_user_email(event)
+        email_verified = get_email_verified(event)
         path = event.get("rawPath") or event.get("path", "")
         method = event.get("requestContext", {}).get("http", {}).get("method", "")
 
@@ -453,6 +455,7 @@ def lambda_handler(event, context):
                 "order_id":       str(uuid.uuid4()),
                 "user_id":        user_id,
                 "user_email":     user_email,
+                "email_verified": email_verified,
                 "items":          processed_items,
                 "address":        address,
                 "subtotal":       subtotal,
@@ -466,12 +469,14 @@ def lambda_handler(event, context):
             if not user_email:
                 print(f"WARN: Order created for user {user_id} with no email — transactional emails will not be sent. "
                       "Ensure the Auth0 API has 'openid profile email' scopes and the JWT includes the email claim.")
+            elif not email_verified:
+                print(f"WARN: Order created for user {user_id} with unverified email {user_email} — skipping confirmation email.")
 
             save_order(order)
             clear_cart(user_id)
 
-            # Notify SNS that order was created (informational only)
-            publish_order_notification(order)
+            if email_verified:
+                publish_order_notification(order)
 
             # SQS fulfillment is triggered by payment_service after payment succeeds,
             # not here — ensures shipped status only follows confirmed payment.

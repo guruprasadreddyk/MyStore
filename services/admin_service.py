@@ -3,19 +3,18 @@ import boto3
 from decimal import Decimal
 from datetime import datetime
 from boto3.dynamodb.conditions import Attr
-from utils import convert_decimal, response, update_order_status
+from utils import convert_decimal, response, update_order_status, get_table_name
 from validation import validate
 
 
-# Lazy-load tables for better testability
 def get_products_table():
-    return boto3.resource("dynamodb").Table("products_table_guru")
+    return boto3.resource("dynamodb").Table(get_table_name("products"))
 
 def get_orders_table():
-    return boto3.resource("dynamodb").Table("orders_table_guru")
+    return boto3.resource("dynamodb").Table(get_table_name("orders"))
 
 def get_returns_table():
-    return boto3.resource("dynamodb").Table("returns_table_guru")
+    return boto3.resource("dynamodb").Table(get_table_name("returns"))
 
 
 # ─── Auth guard ───────────────────────────────────────────────────────────────
@@ -47,6 +46,7 @@ def get_dashboard_stats():
 
         total_orders   = len(orders)
         total_revenue  = sum(
+            float(o.get("grand_total", 0)) or
             sum(float(i.get("price", 0)) * int(i.get("quantity", 1)) for i in o.get("items", []))
             for o in orders
         )
@@ -82,7 +82,9 @@ def get_dashboard_stats():
             if created_at:
                 # Extract date (YYYY-MM-DD) from ISO timestamp
                 date = created_at.split("T")[0]
-                order_total = sum(float(i.get("price", 0)) * int(i.get("quantity", 1)) for i in o.get("items", []))
+                order_total = float(o.get("grand_total", 0)) or sum(
+                    float(i.get("price", 0)) * int(i.get("quantity", 1)) for i in o.get("items", [])
+                )
                 
                 daily_stats[date]["orders"] += 1
                 daily_stats[date]["revenue"] += order_total
