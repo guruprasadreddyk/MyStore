@@ -44,7 +44,7 @@ docs/
 .venv/
 pytest_cache/
 .pytest_cache/
-
+.vscode/
 *.zip
 
 *.log
