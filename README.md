@@ -278,7 +278,6 @@ python -m pytest tests/test_catalog_service.py -v
 - **SNS-based abuse alerts** — Publish to the existing SNS topic when a user exceeds a request threshold within a Lambda, without needing WAF or CloudWatch.
 
 ### Infrastructure
-- **Dead letter queue (DLQ)** — Add an SQS DLQ for the order processing queue so failed fulfillment messages are not silently dropped.
 - **Lambda provisioned concurrency** — Eliminate cold starts on the catalog and payment services for consistent response times.
 - **Multi-region deployment** — DynamoDB Global Tables + multi-region Lambda for disaster recovery and lower latency outside ap-southeast-1.
 
