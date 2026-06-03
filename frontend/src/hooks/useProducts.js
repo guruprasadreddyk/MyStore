@@ -1,5 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { fetchProducts as fetchProductsApi, fetchSearchResults as fetchSearchResultsApi } from '../services/api';
+
+// Known categories (matches seed data and DynamoDB GSI)
+const KNOWN_CATEGORIES = ['All', 'Books', 'Electronics', 'Clothing', 'Home & Kitchen', 'Sports & Fitness'];
 
 export default function useProducts() {
   const [products, setProducts] = useState([]);
@@ -15,16 +18,75 @@ export default function useProducts() {
   const [loading, setLoading] = useState(false);
   const [lastEvaluatedKey, setLastEvaluatedKey] = useState(null);
 
-  const categories = useMemo(
-    () => ['All', ...new Set(products.map((product) => product.category))],
-    [products]
-  );
+  const categories = KNOWN_CATEGORIES;
 
+  // Fetch products — shows first page immediately, loads remaining in background
+  const fetchProducts = useCallback(async () => {
+    setLoading(true);
+
+    try {
+      // Fetch first page — display immediately
+      const firstPage = await fetchProductsApi({
+        lastEvaluatedKey: null,
+        minPrice,
+        maxPrice,
+        category: selectedCategory,
+        sortBy,
+      });
+
+      if (firstPage.status === 'success') {
+        const firstProducts = firstPage.data.items || [];
+        setProducts(firstProducts);
+        setLoading(false); // UI is now interactive
+
+        // Fetch remaining pages in background
+        let currentKey = firstPage.data.lastEvaluatedKey || null;
+        while (currentKey) {
+          const data = await fetchProductsApi({
+            lastEvaluatedKey: currentKey,
+            minPrice,
+            maxPrice,
+            category: selectedCategory,
+            sortBy,
+          });
+
+          if (data.status === 'success') {
+            const newProducts = data.data.items || [];
+            setProducts(prev => {
+              const existingIds = new Set(prev.map(p => p.id));
+              return [...prev, ...newProducts.filter(p => !existingIds.has(p.id))];
+            });
+            currentKey = data.data.lastEvaluatedKey || null;
+          } else {
+            break;
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching products:', error);
+    } finally {
+      setLoading(false);
+      setLastEvaluatedKey(null);
+    }
+  }, [minPrice, maxPrice, selectedCategory, sortBy]);
+
+  // Initial load
   useEffect(() => {
     fetchProducts();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Re-fetch when filters or sort change
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fetchProducts();
+    }, 300); // debounce filter changes
+
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCategory, minPrice, maxPrice, sortBy]);
+
+  // Search handler
   useEffect(() => {
     const query = searchQuery.trim();
     if (query === '') {
@@ -34,13 +96,6 @@ export default function useProducts() {
 
     const fetchSearchResults = async () => {
       setLoading(true);
-      const queryLower = query.toLowerCase();
-      const localFallback = products.filter(
-        (product) =>
-          product.name.toLowerCase().includes(queryLower) ||
-          product.description.toLowerCase().includes(queryLower)
-      );
-
       try {
         const filters = {
           minPrice,
@@ -49,45 +104,49 @@ export default function useProducts() {
           minRating: minRating || undefined,
           inStockOnly: inStockOnly || undefined,
         };
-        
+
         const data = await fetchSearchResultsApi(query, filters);
         if (data.status === 'success') {
-          // API returns { items: [...], lastEvaluatedKey, total }
           const items = data.data?.items ?? data.data;
-          setSearchResults(Array.isArray(items) ? items : localFallback);
+          setSearchResults(Array.isArray(items) ? items : []);
         } else {
           console.error('Search error:', data.message);
-          setSearchResults(localFallback);
+          // Fallback: filter loaded products locally
+          const queryLower = query.toLowerCase();
+          setSearchResults(
+            products.filter(
+              (p) =>
+                p.name.toLowerCase().includes(queryLower) ||
+                (p.description || '').toLowerCase().includes(queryLower)
+            )
+          );
         }
       } catch (error) {
         console.error('Error searching products:', error);
-        setSearchResults(localFallback);
+        const queryLower = query.toLowerCase();
+        setSearchResults(
+          products.filter(
+            (p) =>
+              p.name.toLowerCase().includes(queryLower) ||
+              (p.description || '').toLowerCase().includes(queryLower)
+          )
+        );
       } finally {
         setLoading(false);
       }
     };
 
-    fetchSearchResults();
+    const debounce = setTimeout(fetchSearchResults, 300);
+    return () => clearTimeout(debounce);
   }, [searchQuery, products, minPrice, maxPrice, selectedCategory, minRating, inStockOnly]);
 
+  // Apply client-side filters on loaded data (rating + stock filters not supported server-side)
   useEffect(() => {
     let filtered = Array.isArray(searchResults)
-  ? searchResults
-  : Array.isArray(products)
-  ? products
-  : [];
-
-    if (selectedCategory !== 'All') {
-      filtered = filtered.filter((product) => product.category === selectedCategory);
-    }
-
-    if (minPrice) {
-      filtered = filtered.filter((product) => product.price >= parseFloat(minPrice));
-    }
-
-    if (maxPrice) {
-      filtered = filtered.filter((product) => product.price <= parseFloat(maxPrice));
-    }
+      ? searchResults
+      : Array.isArray(products)
+      ? products
+      : [];
 
     if (minRating) {
       filtered = filtered.filter((product) => (product.rating || 0) >= parseFloat(minRating));
@@ -97,69 +156,8 @@ export default function useProducts() {
       filtered = filtered.filter((product) => (product.stock_quantity || 0) > 0);
     }
 
-    if (sortBy === 'price_low_high') {
-      filtered = [...filtered].sort((a, b) => a.price - b.price);
-    } else if (sortBy === 'price_high_low') {
-      filtered = [...filtered].sort((a, b) => b.price - a.price);
-    }
-
-    setFilteredProducts(filtered || []);
-  }, [products, searchResults, selectedCategory, minPrice, maxPrice, minRating, inStockOnly, sortBy]);
-
-  const fetchProducts = async (loadMore = false) => {
-    setLoading(true);
-    const startKey = loadMore ? lastEvaluatedKey : null;
-
-    try {
-      // On initial load, fetch all pages automatically so the full catalog is available
-      // for client-side filtering and pagination. On "Load More", fetch one page at a time.
-      if (loadMore) {
-        const data = await fetchProductsApi({
-          lastEvaluatedKey: startKey,
-          minPrice,
-          maxPrice,
-          category: selectedCategory,
-          sortBy,
-        });
-        if (data.status === 'success') {
-          const newProducts = data.data.items || [];
-          const existingIds = new Set(products.map(p => p.id));
-          const unique = newProducts.filter(p => !existingIds.has(p.id));
-          setProducts(prev => [...prev, ...unique]);
-          setLastEvaluatedKey(data.data.lastEvaluatedKey || null);
-        }
-      } else {
-        // Fetch all pages on initial load
-        let allProducts = [];
-        let currentKey = null;
-        let hasMore = true;
-        while (hasMore) {
-          const data = await fetchProductsApi({
-            lastEvaluatedKey: currentKey,
-            minPrice,
-            maxPrice,
-            category: selectedCategory,
-            sortBy,
-          });
-          if (data.status === 'success') {
-            const newProducts = data.data.items || [];
-            const existingIds = new Set(allProducts.map(p => p.id));
-            allProducts = [...allProducts, ...newProducts.filter(p => !existingIds.has(p.id))];
-            currentKey = data.data.lastEvaluatedKey || null;
-            hasMore = !!currentKey;
-          } else {
-            hasMore = false;
-          }
-        }
-        setProducts(allProducts);
-        setLastEvaluatedKey(null); // all pages loaded, no more to fetch
-      }
-    } catch (error) {
-      console.error('Error fetching products:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+    setFilteredProducts(filtered);
+  }, [products, searchResults, minRating, inStockOnly]);
 
   const adjustProductStock = (cartItems) => {
     setProducts((prevProducts) =>

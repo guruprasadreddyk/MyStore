@@ -78,7 +78,7 @@ jobs:
       - name: Build Lambda zips
         run: |
           for service in catalog_service user_service order_service payment_service order_processor admin_service; do
-            zip -j "${service}_guru.zip" "services/${service}.py" services/utils.py
+            zip -j "${service}_guru.zip" "services/${service}.py" services/utils.py services/validation.py
             echo "✅ ${service}_guru.zip"
           done
 

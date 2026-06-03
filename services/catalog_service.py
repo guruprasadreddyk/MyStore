@@ -5,7 +5,7 @@ from decimal import Decimal
 from datetime import datetime
 from boto3.dynamodb.conditions import Attr, Key
 import os
-from utils import convert_decimal, response, get_table_name
+from utils import convert_decimal, response, get_table_name, log
 
 # ─── DynamoDB setup (lazy-loaded for testability) ────────────────────────────
 def get_product_table():
@@ -114,33 +114,43 @@ def get_product_recommendations(product_ids, limit=5):
 
         avg_price /= len(selected)
 
-        # Paginate the scan to avoid truncation on large tables
-        all_items = []
-        scan_kwargs = {}
-        while True:
-            page = get_product_table().scan(**scan_kwargs)
-            all_items.extend(page.get("Items", []))
-            last_key = page.get("LastEvaluatedKey")
-            if not last_key:
-                break
-            scan_kwargs["ExclusiveStartKey"] = last_key
-
-        # Normalise product_ids to strings for safe membership check
+        # Query only products in the same categories using the GSI (instead of full scan)
         product_ids_set = {str(pid) for pid in product_ids}
+        candidates = []
+
+        for category in categories:
+            query_kwargs = {
+                "IndexName": "category-price-index",
+                "KeyConditionExpression": Key("category").eq(category),
+                "Limit": 50  # cap per category to avoid reading too much
+            }
+            result = get_product_table().query(**query_kwargs)
+            for item in result.get("Items", []):
+                if str(item.get("id", "")) not in product_ids_set:
+                    candidates.append(item)
+
+        # Score candidates
         recs = []
-        for p in all_items:
-            if str(p.get("id", "")) not in product_ids_set:
-                score = 0
-                if p.get("category", "") in categories:
-                    score += 10
-                diff = abs(float(p.get("price", 0)) - avg_price)
-                if diff < avg_price * 0.2:
-                    score += 5
-                elif diff < avg_price * 0.5:
-                    score += 2
-                score += float(p.get("rating", 0))
-                p["recommendation_score"] = score
-                recs.append(p)
+        seen_ids = set()
+        for p in candidates:
+            pid = str(p.get("id", ""))
+            if pid in seen_ids:
+                continue
+            seen_ids.add(pid)
+
+            score = 0
+            # Category match (always true here since we queried by category)
+            score += 10
+            # Price similarity
+            diff = abs(float(p.get("price", 0)) - avg_price)
+            if diff < avg_price * 0.2:
+                score += 5
+            elif diff < avg_price * 0.5:
+                score += 2
+            # Product rating
+            score += float(p.get("rating", 0))
+            p["recommendation_score"] = score
+            recs.append(p)
 
         recs.sort(key=lambda x: x.get("recommendation_score", 0), reverse=True)
         return convert_decimal(recs[:limit])

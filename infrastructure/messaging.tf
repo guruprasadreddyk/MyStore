@@ -34,7 +34,11 @@ resource "aws_sns_topic_policy" "order_notifications_policy" {
     Statement = [{
       Effect = "Allow"
       Principal = {
-        AWS = aws_iam_role.lambda_role.arn
+        AWS = [
+          aws_iam_role.order_role.arn,
+          aws_iam_role.payment_role.arn,
+          aws_iam_role.processor_role.arn
+        ]
       }
       Action   = "sns:Publish"
       Resource = aws_sns_topic.order_notifications.arn
@@ -67,7 +71,7 @@ resource "aws_sqs_queue_policy" "order_processing_policy" {
     Version = "2012-10-17"
     Statement = [{
       Effect    = "Allow"
-      Principal = { AWS = aws_iam_role.lambda_role.arn }
+      Principal = { AWS = aws_iam_role.payment_role.arn }
       Action    = "sqs:SendMessage"
       Resource  = aws_sqs_queue.order_processing.arn
     }]

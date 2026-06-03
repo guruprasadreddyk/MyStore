@@ -5,6 +5,32 @@ from decimal import Decimal
 from datetime import datetime
 
 
+# ─── Structured Logger ────────────────────────────────────────────────────────
+
+def log(level, action, message=None, **kwargs):
+    """
+    Emit a structured JSON log line for CloudWatch Insights.
+
+    Usage:
+        log("INFO", "order_created", order_id="abc", total=167)
+        log("ERROR", "inventory_reserve_failed", product_id="1", error=str(e))
+
+    Query in CloudWatch Insights:
+        fields @timestamp, action, message
+        | filter level = "ERROR"
+        | sort @timestamp desc
+    """
+    entry = {
+        "level": level,
+        "action": action,
+        "timestamp": datetime.utcnow().isoformat() + "Z"
+    }
+    if message:
+        entry["message"] = message
+    entry.update(kwargs)
+    print(json.dumps(entry, default=str))
+
+
 # ─── Table name resolution (env var → default) ───────────────────────────────
 
 def get_table_name(key):
@@ -53,10 +79,10 @@ def update_order_status(order_id, new_status, message=None):
                 ":empty":  []
             }
         )
-        print(f"INFO: Order {order_id} status updated to {new_status}")
+        log("INFO", "order_status_updated", order_id=str(order_id), status=new_status)
         return True
     except Exception as e:
-        print(f"ERROR updating order status: {str(e)}")
+        log("ERROR", "order_status_update_failed", order_id=str(order_id), status=new_status, error=str(e))
         return False
 
 
@@ -77,10 +103,10 @@ def publish_sns_notification(subject, message):
             Subject=subject,
             Message=message
         )
-        print(f"INFO: SNS notification sent: {subject}")
+        log("INFO", "sns_published", subject=subject)
         return True
     except Exception as e:
-        print(f"ERROR publishing to SNS: {str(e)}")
+        log("ERROR", "sns_publish_failed", subject=subject, error=str(e))
         return False
 
 
@@ -97,13 +123,10 @@ def send_email_via_resend(to_email, subject, html_body, text_body=""):
     smtp_from     = os.environ.get("SMTP_FROM", smtp_user) # display name + address
 
     if not smtp_user or not smtp_password:
-        print("INFO: SMTP_USER / SMTP_PASSWORD not configured — email not sent.")
-        print(f"  TO:      {to_email}")
-        print(f"  SUBJECT: {subject}")
-        print(f"  BODY:    {text_body or '(html only)'}")
+        log("INFO", "email_skipped", reason="smtp_not_configured", to=to_email, subject=subject)
         return
     if not to_email:
-        print("INFO: No recipient email address — skipping email send")
+        log("INFO", "email_skipped", reason="no_recipient", subject=subject)
         return
 
     max_retries = 3
@@ -122,14 +145,14 @@ def send_email_via_resend(to_email, subject, html_body, text_body=""):
                 server.login(smtp_user, smtp_password)
                 server.sendmail(smtp_user, to_email, msg.as_string())
 
-            print(f"INFO: Email sent via Gmail SMTP to {to_email} — {subject}")
+            log("INFO", "email_sent", to=to_email, subject=subject)
             return  # success
         except Exception as e:
-            print(f"ERROR sending email via Gmail SMTP (attempt {attempt + 1}/{max_retries}): {str(e)}")
+            log("WARN", "email_send_retry", to=to_email, subject=subject, attempt=attempt + 1, error=str(e))
             if attempt < max_retries - 1:
                 time.sleep(2 ** attempt)  # exponential backoff: 1s, 2s
             else:
-                print(f"ERROR: Failed to send email after {max_retries} attempts")
+                log("ERROR", "email_send_failed", to=to_email, subject=subject, attempts=max_retries, error=str(e))
 
 
 # 🔹 Fetch product from DynamoDB
@@ -140,7 +163,7 @@ def fetch_product(product_id):
         item   = result.get("Item")
         return convert_decimal(item) if item else None
     except Exception as e:
-        print(f"ERROR fetching product: {str(e)}")
+        log("ERROR", "fetch_product_failed", product_id=str(product_id), error=str(e))
         return None
 
 
@@ -178,7 +201,7 @@ def response(status_code, data=None, message=None):
         "statusCode": status_code,
         "headers": {
             "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Origin": os.environ.get("CORS_ALLOWED_ORIGIN", "*"),
             "Access-Control-Allow-Headers": "Content-Type,Authorization",
             "Access-Control-Allow-Methods": "OPTIONS,GET,POST,PUT,DELETE"
         },

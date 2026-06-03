@@ -1,7 +1,7 @@
 import json
 import boto3
 import os
-from utils import convert_decimal, send_email_via_resend, publish_sns_notification, get_table_name
+from utils import convert_decimal, send_email_via_resend, publish_sns_notification, get_table_name, log
 
 # Lazy-load tables for testability
 def get_orders_table():

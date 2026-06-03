@@ -1,11 +1,12 @@
-variable "lambda_role_name" {
-  type    = string
-  default = "lambda_exec_role_guru"
-}
-
 variable "api_name" {
   type    = string
   default = "API_Services_Guru"
+}
+
+variable "frontend_domain" {
+  type        = string
+  default     = ""
+  description = "CloudFront distribution domain (e.g. d1234abcd.cloudfront.net). Set after first deploy."
 }
 
 variable "frontend_bucket_prefix" {
@@ -37,7 +38,7 @@ variable "aws_profile" {
 
 variable "notification_email" {
   type        = string
-  default     = "guruprasad.reddy@idp.com"
+  default     = "kguruprasadreddy2004@gmail.com"
   description = "Email address for SNS order notifications (admin)"
 }
 

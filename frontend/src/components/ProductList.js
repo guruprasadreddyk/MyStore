@@ -179,6 +179,22 @@ function ProductList({
             </div>
           )}
 
+          {loading && currentItems.length === 0 ? (
+            <div className="product-grid">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div key={i} className="skeleton-card" style={{
+                  background: 'rgba(255,255,255,0.04)',
+                  borderRadius: '12px',
+                  padding: '16px',
+                  animation: 'pulse 1.5s ease-in-out infinite',
+                }}>
+                  <div style={{ width: '100%', height: '180px', background: 'rgba(255,255,255,0.08)', borderRadius: '8px', marginBottom: '12px' }} />
+                  <div style={{ width: '70%', height: '14px', background: 'rgba(255,255,255,0.08)', borderRadius: '4px', marginBottom: '8px' }} />
+                  <div style={{ width: '40%', height: '14px', background: 'rgba(255,255,255,0.08)', borderRadius: '4px' }} />
+                </div>
+              ))}
+            </div>
+          ) : (
           <div className="product-grid">
             {currentItems.map((product, index) => (
               <ProductCard
@@ -193,6 +209,7 @@ function ProductList({
               />
             ))}
           </div>
+          )}
 
           {totalPages > 1 && (
             <div className="pagination">
@@ -208,28 +225,6 @@ function ProductList({
             </div>
           )}
 
-          {/* Load more from server only when there are more pages to fetch */}
-          {lastEvaluatedKey && (
-            <div style={{ textAlign: 'center', marginTop: '24px' }}>
-              <button
-                onClick={() => fetchProducts(true)}
-                disabled={loading}
-                style={{
-                  padding: '10px 28px',
-                  background: 'rgba(59,130,246,0.15)',
-                  border: '1px solid #3b82f6',
-                  borderRadius: '8px',
-                  color: '#3b82f6',
-                  cursor: loading ? 'not-allowed' : 'pointer',
-                  fontSize: '0.9rem',
-                  fontWeight: 600,
-                  opacity: loading ? 0.6 : 1,
-                }}
-              >
-                {loading ? 'Loading…' : 'Load More Products'}
-              </button>
-            </div>
-          )}
         </main>
       </div>
     </div>

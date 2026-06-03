@@ -44,10 +44,13 @@ export default function useOrders() {
       return { status: 'error', message: 'Authentication required' };
     }
 
+    // Generate idempotency key for this checkout attempt — same key is sent on retries
+    const idempotencyKey = `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+
     setLoading(true);
     try {
       const headers = await getHeaders(isAuthenticated, getAccessTokenSilently);
-      const data = await placeOrderApi(items, address, headers);
+      const data = await placeOrderApi(items, address, headers, idempotencyKey);
 
       if (data.status === 'success') {
         loadOrders();

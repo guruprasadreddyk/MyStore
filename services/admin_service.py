@@ -1,9 +1,10 @@
 import json
+import time
 import boto3
 from decimal import Decimal
 from datetime import datetime
 from boto3.dynamodb.conditions import Attr
-from utils import convert_decimal, response, update_order_status, get_table_name
+from utils import convert_decimal, response, update_order_status, get_table_name, log
 from validation import validate
 
 
@@ -36,9 +37,19 @@ def is_admin(event):
         return False
 
 
-# ─── Dashboard stats ──────────────────────────────────────────────────────────
+# ─── Dashboard stats (cached for 60 seconds within Lambda warm instance) ─────
+
+_dashboard_cache = {"data": None, "expires_at": 0}
+DASHBOARD_CACHE_TTL = 60  # seconds
 
 def get_dashboard_stats():
+    global _dashboard_cache
+
+    # Return cached data if still fresh
+    if _dashboard_cache["data"] is not None and time.time() < _dashboard_cache["expires_at"]:
+        print("INFO: Returning cached dashboard stats")
+        return _dashboard_cache["data"]
+
     try:
         # All orders
         orders_result = get_orders_table().scan()
@@ -105,7 +116,7 @@ def get_dashboard_stats():
                 "customers": len(stats["customers"])
             })
 
-        return {
+        result = {
             "total_orders":   total_orders,
             "total_revenue":  round(total_revenue, 2),
             "status_counts":  status_counts,
@@ -113,6 +124,12 @@ def get_dashboard_stats():
             "top_products":   [{"product_id": pid, "units_sold": qty} for pid, qty in top_products],
             "time_series":    time_series
         }
+
+        # Cache the result for subsequent requests within the same warm Lambda
+        _dashboard_cache["data"] = result
+        _dashboard_cache["expires_at"] = time.time() + DASHBOARD_CACHE_TTL
+
+        return result
     except Exception as e:
         print(f"ERROR getting dashboard stats: {str(e)}")
         return {}

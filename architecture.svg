@@ -1,0 +1,138 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 600" font-family="Segoe UI, system-ui, sans-serif">
+  <!-- Background -->
+  <rect width="900" height="600" fill="#0f1117" rx="8"/>
+
+  <!-- Title -->
+  <text x="450" y="30" text-anchor="middle" fill="#94a3b8" font-size="12" font-weight="700" letter-spacing="2">MYSTORE — SYSTEM ARCHITECTURE</text>
+
+  <!-- CLIENT LAYER -->
+  <rect x="50" y="48" width="800" height="68" rx="10" fill="none" stroke="#1e3a5f" stroke-width="1.2" stroke-dasharray="5,3"/>
+  <text x="70" y="63" fill="#475569" font-size="9" font-weight="700">CLIENT</text>
+  <rect x="270" y="66" width="180" height="40" rx="8" fill="#0c1a2e" stroke="#3b82f6" stroke-width="1.2"/>
+  <text x="360" y="84" text-anchor="middle" fill="#60a5fa" font-size="11" font-weight="700">🌐 React SPA</text>
+  <text x="360" y="99" text-anchor="middle" fill="#64748b" font-size="8.5">React 18 · Router v7 · Auth0 SDK</text>
+  <rect x="480" y="66" width="150" height="40" rx="8" fill="#150d24" stroke="#8b5cf6" stroke-width="1.2"/>
+  <text x="555" y="84" text-anchor="middle" fill="#a78bfa" font-size="11" font-weight="700">🔐 Auth0</text>
+  <text x="555" y="99" text-anchor="middle" fill="#64748b" font-size="8.5">JWT · Universal Login</text>
+
+  <!-- Arrow 1 -->
+  <line x1="450" y1="116" x2="450" y2="138" stroke="#334155" stroke-width="1.5"/>
+  <polygon points="450,144 446,137 454,137" fill="#475569"/>
+  <text x="468" y="132" fill="#475569" font-size="7.5">HTTPS + JWT</text>
+
+  <!-- CDN LAYER -->
+  <rect x="50" y="148" width="800" height="55" rx="10" fill="none" stroke="#164e63" stroke-width="1.2" stroke-dasharray="5,3"/>
+  <text x="70" y="163" fill="#475569" font-size="9" font-weight="700">CDN &amp; HOSTING</text>
+  <rect x="290" y="165" width="320" height="30" rx="8" fill="#071520" stroke="#06b6d4" stroke-width="1.2"/>
+  <text x="450" y="184" text-anchor="middle" fill="#22d3ee" font-size="11" font-weight="700">⚡ CloudFront  →  S3 Bucket</text>
+
+  <!-- Arrow 2 -->
+  <line x1="450" y1="203" x2="450" y2="222" stroke="#334155" stroke-width="1.5"/>
+  <polygon points="450,228 446,221 454,221" fill="#475569"/>
+  <text x="468" y="218" fill="#475569" font-size="7.5">API calls</text>
+
+  <!-- API GATEWAY -->
+  <rect x="50" y="232" width="800" height="55" rx="10" fill="none" stroke="#78350f" stroke-width="1.2" stroke-dasharray="5,3"/>
+  <text x="70" y="247" fill="#475569" font-size="9" font-weight="700">API LAYER</text>
+  <rect x="190" y="248" width="520" height="32" rx="8" fill="#1a1407" stroke="#f59e0b" stroke-width="1.2"/>
+  <text x="450" y="265" text-anchor="middle" fill="#fbbf24" font-size="11" font-weight="700">🔀 API Gateway HTTP API v2</text>
+  <text x="450" y="277" text-anchor="middle" fill="#64748b" font-size="8.5">JWT Authorizer · CORS · Per-route Throttling</text>
+
+  <!-- Arrow 3 -->
+  <line x1="450" y1="287" x2="450" y2="306" stroke="#334155" stroke-width="1.5"/>
+  <polygon points="450,312 446,305 454,305" fill="#475569"/>
+
+  <!-- COMPUTE LAYER -->
+  <rect x="50" y="316" width="800" height="100" rx="10" fill="none" stroke="#1e293b" stroke-width="1.2" stroke-dasharray="5,3"/>
+  <text x="70" y="331" fill="#475569" font-size="9" font-weight="700">COMPUTE — AWS LAMBDA (Python 3.12)</text>
+
+  <!-- Lambda boxes -->
+  <rect x="65" y="340" width="115" height="46" rx="7" fill="#0c1a2e" stroke="#3b82f6" stroke-width="1"/>
+  <text x="122" y="358" text-anchor="middle" fill="#60a5fa" font-size="9.5" font-weight="700">📦 Catalog</text>
+  <text x="122" y="372" text-anchor="middle" fill="#64748b" font-size="7.5">Products · Search</text>
+  <text x="122" y="382" text-anchor="middle" fill="#64748b" font-size="7.5">Reviews · Recs</text>
+
+  <rect x="192" y="340" width="115" height="46" rx="7" fill="#150d24" stroke="#8b5cf6" stroke-width="1"/>
+  <text x="249" y="358" text-anchor="middle" fill="#a78bfa" font-size="9.5" font-weight="700">👤 User</text>
+  <text x="249" y="372" text-anchor="middle" fill="#64748b" font-size="7.5">Cart · Wishlist</text>
+  <text x="249" y="382" text-anchor="middle" fill="#64748b" font-size="7.5">Profile · Addresses</text>
+
+  <rect x="319" y="340" width="115" height="46" rx="7" fill="#071a14" stroke="#10b981" stroke-width="1"/>
+  <text x="376" y="358" text-anchor="middle" fill="#34d399" font-size="9.5" font-weight="700">🛒 Order</text>
+  <text x="376" y="372" text-anchor="middle" fill="#64748b" font-size="7.5">Orders · Returns</text>
+  <text x="376" y="382" text-anchor="middle" fill="#64748b" font-size="7.5">Inventory Reserve</text>
+
+  <rect x="446" y="340" width="115" height="46" rx="7" fill="#1a1407" stroke="#f59e0b" stroke-width="1"/>
+  <text x="503" y="358" text-anchor="middle" fill="#fbbf24" font-size="9.5" font-weight="700">💳 Payment</text>
+  <text x="503" y="372" text-anchor="middle" fill="#64748b" font-size="7.5">Razorpay · HMAC</text>
+  <text x="503" y="382" text-anchor="middle" fill="#64748b" font-size="7.5">Simulation</text>
+
+  <rect x="573" y="340" width="115" height="46" rx="7" fill="#1a0a10" stroke="#f43f5e" stroke-width="1"/>
+  <text x="630" y="358" text-anchor="middle" fill="#fb7185" font-size="9.5" font-weight="700">⚙️ Admin</text>
+  <text x="630" y="372" text-anchor="middle" fill="#64748b" font-size="7.5">CRUD · Analytics</text>
+  <text x="630" y="382" text-anchor="middle" fill="#64748b" font-size="7.5">Return Mgmt</text>
+
+  <rect x="700" y="340" width="115" height="46" rx="7" fill="#071520" stroke="#06b6d4" stroke-width="1"/>
+  <text x="757" y="358" text-anchor="middle" fill="#22d3ee" font-size="9.5" font-weight="700">🚚 Processor</text>
+  <text x="757" y="372" text-anchor="middle" fill="#64748b" font-size="7.5">SQS Worker</text>
+  <text x="757" y="382" text-anchor="middle" fill="#64748b" font-size="7.5">Fulfillment</text>
+
+  <!-- Shared bar -->
+  <rect x="65" y="393" width="750" height="17" rx="4" fill="none" stroke="#334155" stroke-width="1" stroke-dasharray="3,2"/>
+  <text x="440" y="404" text-anchor="middle" fill="#475569" font-size="7.5">📎 Shared: utils.py (response · email · SNS · table names) + validation.py</text>
+
+  <!-- Arrow 4 -->
+  <line x1="450" y1="416" x2="450" y2="434" stroke="#334155" stroke-width="1.5"/>
+  <polygon points="450,440 446,433 454,433" fill="#475569"/>
+
+  <!-- DATA LAYER -->
+  <rect x="50" y="444" width="800" height="58" rx="10" fill="none" stroke="#14532d" stroke-width="1.2" stroke-dasharray="5,3"/>
+  <text x="70" y="459" fill="#475569" font-size="9" font-weight="700">DATA — DYNAMODB (On-demand · PAY_PER_REQUEST)</text>
+
+  <rect x="65" y="466" width="88" height="27" rx="5" fill="#071a14" stroke="#10b981" stroke-width="0.8" stroke-opacity="0.5"/>
+  <text x="109" y="483" text-anchor="middle" fill="#34d399" font-size="8.5" font-weight="600">products</text>
+
+  <rect x="162" y="466" width="75" height="27" rx="5" fill="#071a14" stroke="#10b981" stroke-width="0.8" stroke-opacity="0.5"/>
+  <text x="199" y="483" text-anchor="middle" fill="#34d399" font-size="8.5" font-weight="600">orders</text>
+
+  <rect x="246" y="466" width="65" height="27" rx="5" fill="#071a14" stroke="#10b981" stroke-width="0.8" stroke-opacity="0.5"/>
+  <text x="278" y="483" text-anchor="middle" fill="#34d399" font-size="8.5" font-weight="600">cart</text>
+
+  <rect x="320" y="466" width="78" height="27" rx="5" fill="#071a14" stroke="#10b981" stroke-width="0.8" stroke-opacity="0.5"/>
+  <text x="359" y="483" text-anchor="middle" fill="#34d399" font-size="8.5" font-weight="600">wishlist</text>
+
+  <rect x="407" y="466" width="88" height="27" rx="5" fill="#071a14" stroke="#10b981" stroke-width="0.8" stroke-opacity="0.5"/>
+  <text x="451" y="483" text-anchor="middle" fill="#34d399" font-size="8.5" font-weight="600">user_data</text>
+
+  <rect x="504" y="466" width="78" height="27" rx="5" fill="#071a14" stroke="#10b981" stroke-width="0.8" stroke-opacity="0.5"/>
+  <text x="543" y="483" text-anchor="middle" fill="#34d399" font-size="8.5" font-weight="600">reviews</text>
+
+  <rect x="591" y="466" width="75" height="27" rx="5" fill="#071a14" stroke="#10b981" stroke-width="0.8" stroke-opacity="0.5"/>
+  <text x="628" y="483" text-anchor="middle" fill="#34d399" font-size="8.5" font-weight="600">returns</text>
+
+  <!-- Arrow 5 -->
+  <line x1="450" y1="502" x2="450" y2="518" stroke="#334155" stroke-width="1.5"/>
+  <polygon points="450,524 446,517 454,517" fill="#475569"/>
+
+  <!-- EXTERNAL SERVICES -->
+  <rect x="50" y="528" width="800" height="55" rx="10" fill="none" stroke="#1e293b" stroke-width="1.2" stroke-dasharray="5,3"/>
+  <text x="70" y="543" fill="#475569" font-size="9" font-weight="700">EXTERNAL SERVICES &amp; MESSAGING</text>
+
+  <rect x="75" y="550" width="135" height="26" rx="6" fill="#150d24" stroke="#8b5cf6" stroke-width="1" stroke-opacity="0.6"/>
+  <text x="142" y="567" text-anchor="middle" fill="#a78bfa" font-size="8.5" font-weight="600">🔐 Auth0 (JWT + M2M)</text>
+
+  <rect x="225" y="550" width="145" height="26" rx="6" fill="#0c1a2e" stroke="#3b82f6" stroke-width="1" stroke-opacity="0.6"/>
+  <text x="297" y="567" text-anchor="middle" fill="#60a5fa" font-size="8.5" font-weight="600">💰 Razorpay (Payments)</text>
+
+  <rect x="385" y="550" width="140" height="26" rx="6" fill="#071a14" stroke="#10b981" stroke-width="1" stroke-opacity="0.6"/>
+  <text x="455" y="567" text-anchor="middle" fill="#34d399" font-size="8.5" font-weight="600">📧 Gmail SMTP (Email)</text>
+
+  <rect x="540" y="550" width="145" height="26" rx="6" fill="#071520" stroke="#06b6d4" stroke-width="1" stroke-opacity="0.6"/>
+  <text x="612" y="567" text-anchor="middle" fill="#22d3ee" font-size="8.5" font-weight="600">🔁 SQS (Fulfillment)</text>
+
+  <rect x="700" y="550" width="135" height="26" rx="6" fill="#1a1407" stroke="#f59e0b" stroke-width="1" stroke-opacity="0.6"/>
+  <text x="767" y="567" text-anchor="middle" fill="#fbbf24" font-size="8.5" font-weight="600">📣 SNS (Notifications)</text>
+
+  <!-- Footer -->
+  <text x="450" y="596" text-anchor="middle" fill="#334155" font-size="8">MyStore · ap-southeast-1 · Terraform · Serverless</text>
+</svg>

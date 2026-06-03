@@ -4,7 +4,7 @@ import boto3
 from decimal import Decimal
 from datetime import datetime
 from botocore.exceptions import ClientError
-from utils import convert_decimal, response, get_user_id, get_user_email, get_email_verified, send_email_via_resend, fetch_product, publish_sns_notification, get_table_name
+from utils import convert_decimal, response, get_user_id, get_user_email, get_email_verified, send_email_via_resend, fetch_product, publish_sns_notification, get_table_name, log
 from validation import validate
 
 # Lazy-load tables for testability
@@ -359,6 +359,16 @@ def lambda_handler(event, context):
             body  = json.loads(event.get("body") or "{}")
             items = body.get("items", [])
 
+            # ── Idempotency check ─────────────────────────────────────────────
+            idempotency_key = body.get("idempotency_key")
+            if idempotency_key:
+                # Check if an order with this key already exists for this user
+                existing_orders = get_all_orders(user_id)
+                for existing in existing_orders:
+                    if existing.get("idempotency_key") == idempotency_key:
+                        print(f"INFO: Duplicate order request (idempotency_key={idempotency_key})")
+                        return response(200, data=existing, message="Order already created (duplicate request)")
+
             # Validate input
             try:
                 validate(body, "create_order")
@@ -466,6 +476,9 @@ def lambda_handler(event, context):
                 "created_at":     datetime.utcnow().isoformat() + "Z"
             }
 
+            if idempotency_key:
+                order["idempotency_key"] = idempotency_key
+
             if not user_email:
                 print(f"WARN: Order created for user {user_id} with no email — transactional emails will not be sent. "
                       "Ensure the Auth0 API has 'openid profile email' scopes and the JWT includes the email claim.")
@@ -497,7 +510,7 @@ def lambda_handler(event, context):
 
             return response(200, data=order)
 
-        # 🔹 PUT /order/{id} → update status
+        # 🔹 PUT /order/{id} → update status (owner only, valid transitions)
         if path.startswith("/order/") and method == "PUT":
             order_id = path.split("/")[-1]
             body = json.loads(event.get("body") or "{}")
@@ -507,7 +520,28 @@ def lambda_handler(event, context):
             if not order:
                 return response(404, message="Order not found")
 
-            order["status"] = body.get("status", order["status"])
+            # Ownership check — only the order owner can update their order
+            if order.get("user_id") != user_id:
+                return response(403, message="Not authorised to update this order")
+
+            new_status = body.get("status")
+            if not new_status:
+                return response(400, message="status is required")
+
+            # Valid status transitions for customers (admin uses /admin/orders/{id})
+            valid_transitions = {
+                "created":  {"cancelled"},
+                "paid":     set(),
+                "shipped":  set(),
+                "delivered": {"return_pending"},
+            }
+
+            current_status = order.get("status", "")
+            allowed = valid_transitions.get(current_status, set())
+            if new_status not in allowed:
+                return response(400, message=f"Cannot transition from '{current_status}' to '{new_status}'")
+
+            order["status"] = new_status
             save_order(order)
 
             return response(200, data=order, message="Order updated")

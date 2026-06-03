@@ -14,7 +14,7 @@ import time
 import urllib.request
 import boto3
 from decimal import Decimal
-from utils import response, send_email_via_resend, fetch_product, convert_decimal, get_user_id, get_table_name
+from utils import response, send_email_via_resend, fetch_product, convert_decimal, get_user_id, get_table_name, log
 from validation import validate
 
 # Lazy-load tables for testability

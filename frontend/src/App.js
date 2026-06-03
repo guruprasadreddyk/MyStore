@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Routes, Route, useNavigate, Navigate } from 'react-router-dom';
 import './App.css';
+import ErrorBoundary from './components/ErrorBoundary';
 import Navigation from './components/Navigation';
 import ProductList from './components/ProductList';
 import Cart from './components/Cart';
@@ -153,7 +154,7 @@ function App() {
 
       if (data.status === 'success') {
         addToast('Return request submitted successfully', 'success');
-        setTimeout(() => { window.location.reload(); }, 1500);
+        await loadOrders();
       } else {
         addToast(data.message || 'Failed to submit return request', 'error');
       }
@@ -184,6 +185,7 @@ function App() {
         products={products}
       />
       <main>
+        <ErrorBoundary>
         <Routes>
           <Route path="/" element={<Navigate to="/products" />} />
           <Route path="/products" element={
@@ -240,6 +242,7 @@ function App() {
           <Route path="/payment-methods" element={<PaymentMethodsPage />} />
           <Route path="/notifications" element={<NotificationsPage orders={orders} />} />
         </Routes>
+        </ErrorBoundary>
       </main>
 
       <Cart

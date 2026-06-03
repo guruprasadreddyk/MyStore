@@ -4,7 +4,7 @@ import os
 import boto3
 import urllib.request
 import base64
-from utils import response, send_email_via_resend, publish_sns_notification, update_order_status, get_table_name
+from utils import response, send_email_via_resend, publish_sns_notification, update_order_status, get_table_name, log
 from validation import validate
 
 # Lazy-load tables for testability

@@ -1,48 +1,248 @@
 # MyStore E-commerce Platform
 
-A full-stack serverless e-commerce platform built with React, AWS Lambda, DynamoDB, and Auth0.
+A full-stack serverless e-commerce platform built with React, AWS Lambda, DynamoDB, and Auth0. Features atomic inventory management, Razorpay payment integration with signature verification, per-function IAM isolation, structured observability, and a comprehensive test suite (200 backend + 28 UI tests).
+
+**Live:** [https://d3hckftk4ilq7v.cloudfront.net](https://d3hckftk4ilq7v.cloudfront.net)
+
+**Demo Admin Access:**
+| Email | Password |
+|-------|----------|
+| `kguruprasadreddy2004@gmail.com` | `Guru@123` |
+
+> Login and navigate to the "Profile -> Admin Panel" to explore dashboard analytics, product management, order management, and return workflows.
 
 ## 🚀 Features
 
-- **Product Catalog** - Browse, search, and filter products with pagination
+- **Product Catalog** - Browse, search, and filter products with progressive loading and pagination
 - **Product Variants** - Size, color, and capacity options for products
-- **Shopping Cart** - Add/remove items with automatic cart management
-- **Wishlist** - Save favorite products for later
-- **User Authentication** - Secure Auth0 JWT-based authentication
-- **Order Management** - Create orders with address validation and order tracking
-- **Payment Processing** - Razorpay integration with fallback simulation mode
-- **Product Reviews** - Rate and review products (verified purchase only)
-- **Return Management** - Request, approve, reject, and refund returns
-- **Admin Panel** - Manage products, orders, returns, and inventory with analytics dashboard
-- **Email Notifications** - Transactional emails via Gmail SMTP (verified users only)
+- **Shopping Cart** - Add/remove items with variant support, stock validation, and 7-day TTL auto-expiry
+- **Wishlist** - Save favorite products for later (move-to-cart with stock guard)
+- **User Authentication** - Secure Auth0 JWT-based authentication with custom claims
+- **Order Management** - Atomic inventory reservation with rollback, idempotent creation, status history tracking
+- **Payment Processing** - Razorpay integration with HMAC-SHA256 verification and simulation fallback
+- **Product Reviews** - Rate and review products (verified purchase only, one per user per product)
+- **Return Management** - Request, approve, reject, and refund returns with email notifications at each step
+- **Admin Panel** - Manage products, orders, returns, and inventory with cached analytics dashboard
+- **Email Notifications** - Transactional emails via Gmail SMTP with retry and exponential backoff (verified users only)
 - **Order History Filters** - Filter orders by status, date range, and sort order
 - **Email Verification Reminders** - Banner and checkout warning for unverified users
+- **Recommendations Engine** - Category-aware product recommendations using DynamoDB GSI queries
+- **Error Resilience** - React error boundaries, graceful degradation, dead-letter queue for failed messages
+
+## 🏗️ Architecture
+
+![MyStore Architecture](architecture.svg)
+
+**Key flows:**
+- **Browse** → CloudFront → API Gateway → Catalog Lambda → DynamoDB
+- **Order** → API Gateway (JWT) → Order Lambda → reserve inventory (atomic) → save → SNS + Gmail
+- **Payment** → API Gateway (JWT) → Payment Lambda → Razorpay verify (HMAC) → SQS → Processor → shipped
+- **Admin** → API Gateway (JWT + role claim) → Admin Lambda → DynamoDB
+
+**Architecture characteristics:**
+- 6 independent Lambda microservices, each with its own least-privilege IAM role
+- DynamoDB on-demand billing with GSIs for efficient query patterns
+- Asynchronous order fulfillment via SQS with dead-letter queue (5 retries)
+- Per-route API throttling (payment: 5 req/s, orders: 10 req/s, catalog: 100 req/s)
+- CORS restricted to production CloudFront domain + localhost
+- Structured JSON logging across all services for CloudWatch Insights
+
+---
 
 ## 🛠️ Tech Stack
 
 ### Frontend
-- **React 18** - UI framework
+- **React 18** - UI framework with hooks-based architecture
 - **React Router v7** - Client-side routing
-- **Auth0 React SDK** - Authentication
-- **CSS3** - Styling (no framework dependencies)
+- **Auth0 React SDK** - Authentication with token caching
+- **CSS3** - Component-scoped styling (no framework dependencies)
+- **Error Boundaries** - Graceful error handling for component failures
 
 ### Backend
-- **AWS Lambda** - Serverless compute (Python 3.12)
-- **API Gateway HTTP API** - RESTful API with JWT authorizer
-- **DynamoDB** - NoSQL database with GSI for efficient queries
-- **SQS** - Asynchronous order processing queue
-- **SNS** - Admin notifications via email
+- **AWS Lambda** - Serverless compute (Python 3.12, zero external dependencies)
+- **API Gateway HTTP API** - RESTful API with JWT authorizer and per-route throttling
+- **DynamoDB** - NoSQL database with GSIs, TTL, and point-in-time recovery
+- **SQS** - Asynchronous order processing with dead-letter queue
+- **SNS** - Admin notifications via email subscription
 
 ### Infrastructure
-- **Terraform** - Infrastructure as Code
-- **CloudFront** - CDN for frontend distribution
-- **S3** - Static website hosting
-- **IAM** - Fine-grained access control
+- **Terraform** - Infrastructure as Code (13 files, fully reproducible)
+- **CloudFront** - CDN for frontend distribution (global edge locations)
+- **S3** - Static website hosting with OAI access control
+- **IAM** - Per-function least-privilege roles (6 separate roles, no `FullAccess` policies)
+
+### Observability
+- **Structured Logging** - JSON log lines from all services (queryable via CloudWatch Insights)
+- **API Access Logs** - Per-request logging: IP, method, path, status, latency, user ID
+- **CloudWatch Metrics** - Lambda invocations/duration/errors, API Gateway 4xx/5xx, DynamoDB capacity
 
 ### Third-Party Services
-- **Auth0** - User authentication and authorization
-- **Razorpay** - Payment gateway (Indian market)
-- **Gmail SMTP** - Transactional email delivery (App Password, verified users only)
+- **Auth0** - User authentication and authorization (OAuth 2.0 / OIDC)
+- **Razorpay** - Payment gateway with HMAC signature verification (Indian market)
+- **Gmail SMTP** - Transactional email delivery (App Password, retry with exponential backoff)
+
+### Testing
+- **pytest + moto** - 200 backend unit tests with mocked DynamoDB
+- **Playwright + POM** - 28 UI automation tests (Page Object Model pattern)
+- **GitHub Actions** - CI pipeline: test → build → package on every push
+
+##  Project Structure
+
+```
+.
+├── frontend/                 # React frontend application
+│   ├── src/
+│   │   ├── components/      # React components (with component-scoped CSS + ErrorBoundary)
+│   │   ├── hooks/           # Custom React hooks (useProducts, useCart, useOrders, etc.)
+│   │   └── services/        # API service layer (apiFetch, getHeaders, idempotency)
+│   └── public/              # Static assets
+├── services/                # Lambda function handlers (Python 3.12, zero external deps)
+│   ├── catalog_service.py   # Product catalog, search, reviews & recommendations (GSI-based)
+│   ├── order_service.py     # Order management, returns, idempotency, atomic inventory
+│   ├── payment_service.py   # Payment processing (Razorpay HMAC + simulation)
+│   ├── user_service.py      # User profile, cart (TTL), wishlist & addresses
+│   ├── admin_service.py     # Admin operations, analytics (cached 60s)
+│   ├── order_processor.py   # SQS async fulfillment (paid → shipped)
+│   ├── utils.py             # Structured logger, response helper, email (retry), SNS, DynamoDB
+│   └── validation.py        # Schema-based input validation (no external dependencies)
+├── infrastructure/          # Terraform IaC (13 files)
+│   ├── main.tf             # Provider configuration
+│   ├── lambda.tf           # Lambda functions (per-function IAM role assignment)
+│   ├── api.tf              # API Gateway: routes, JWT auth, CORS, per-route throttling
+│   ├── api_versioning.tf   # Versioned API routes (v1)
+│   ├── dynamodb.tf         # 7 database tables with GSIs, TTL, PITR
+│   ├── messaging.tf        # SQS (+ DLQ) & SNS
+│   ├── frontend.tf         # S3 & CloudFront (OAI, SPA fallback)
+│   ├── iam.tf              # 6 per-function least-privilege IAM roles
+│   └── observability.tf    # CloudWatch log groups for API access logs
+├── tests/                  # 200 pytest tests (moto for DynamoDB mocking)
+├── scripts/                # Deployment & utility scripts
+│   ├── build_lambdas.ps1   # Package Lambda functions (service + utils + validation)
+│   ├── deploy_frontend.ps1 # Deploy frontend to S3
+│   └── seed_products.py    # Seed initial product data (50 products, 5 categories)
+├── docs/                   # 12 documentation files + architecture SVG
+└── .github/workflows/      # CI pipeline (test → build → package)
+```
+
+## 🔑 Key Endpoints
+
+### Public Endpoints (No Auth Required)
+- `GET /products` - List products with pagination and filters (category, price, sort)
+- `GET /products/{id}` - Get product details
+- `GET /products/{id}/variants` - Get product variants (size, color, capacity)
+- `GET /products/{id}/reviews` - Get product reviews (paginated, newest first)
+- `GET /search` - Search products with filters (brand, rating, stock, price)
+- `GET /recommendations` - Category-aware product recommendations
+- `GET /health` - Service health check
+
+### Protected Endpoints (Auth Required)
+- `GET /cart` - Get cart contents
+- `POST /cart/add` - Add item to cart (with variant support + stock validation)
+- `DELETE /cart/remove/{id}` - Remove/decrement item from cart
+- `POST /order` - Create order (idempotent with `idempotency_key`)
+- `GET /order` - Get order history (user's orders only)
+- `PUT /order/{id}` - Update order status (valid transitions only, owner only)
+- `DELETE /order/{id}` - Cancel order (restores inventory atomically)
+- `POST /payment/create-order` - Create Razorpay order (or simulation mode)
+- `POST /payment` - Verify payment + trigger async fulfillment
+- `GET /wishlist` - Get wishlist
+- `POST /wishlist/add` - Add to wishlist
+- `POST /products/{id}/reviews` - Submit product review (verified purchase only)
+- `POST /return` - Create return request (delivered orders only)
+- `GET /return/{id}` - Get return request details (owner only)
+- `GET/PUT /profile/me` - User profile management
+- `GET/POST/PUT/DELETE /addresses/*` - Saved addresses
+
+### Admin Endpoints (Admin Role Required)
+- `GET /admin/dashboard` - Dashboard analytics with time-series data (cached 60s)
+- `GET /admin/products` - List all products
+- `POST /admin/products` - Add product
+- `PUT /admin/products/{id}` - Update product
+- `DELETE /admin/products/{id}` - Delete product
+- `GET /admin/orders` - List all orders (filterable by status)
+- `PUT /admin/orders/{id}` - Update order status
+- `GET /admin/returns` - List all return requests (filterable)
+- `PUT /admin/returns/{id}/approve` - Approve return request
+- `PUT /admin/returns/{id}/reject` - Reject return request with reason
+- `PUT /admin/returns/{id}/refund` - Process refund for approved return
+
+See [API Documentation](docs/API.md) for complete API reference.
+
+## 🧪 Testing
+
+```bash
+# Run all 200 backend tests
+python -m pytest tests/ -v
+
+# Run specific test file
+python -m pytest tests/test_catalog_service.py -v
+
+# Run by marker
+python -m pytest -m smoke      # Quick validation
+python -m pytest -m unit       # Fast, isolated tests
+```
+
+**Test coverage includes:** order creation with inventory reservation/rollback, payment decline rules, idempotency (duplicate detection), ownership checks (403 for unauthorized), status transition validation, pricing calculations, variant handling, input validation edge cases, email verification enforcement.
+
+### UI Automation Tests
+
+```bash
+cd "MyStore - AT"
+pip install -r requirements.txt
+playwright install chromium
+pytest                          # 28 tests (headed mode)
+pytest --headless               # CI mode
+pytest -m quickview             # Specific feature
+```
+
+### CI/CD Pipeline
+
+GitHub Actions runs on every push/PR to `main`:
+1. **Backend Tests** - Python 3.12 + pytest + moto (mocked DynamoDB)
+2. **Frontend Build** - Node.js 18, verifies production build succeeds
+3. **Lambda Packaging** - Verifies all 6 zips build correctly (service + utils + validation)
+
+## 📊 Observability
+
+- **Structured Logging** - All Lambda functions emit JSON log lines (`{"level": "ERROR", "action": "...", "order_id": "..."}`) queryable via CloudWatch Insights
+- **API Access Logs** - Every request logged with IP, method, path, status, latency (ms), user ID
+- **CloudWatch Metrics** - Lambda invocations/duration/errors, API Gateway request counts, DynamoDB capacity
+- **DLQ Monitoring** - Dead-letter queue captures failed order processing messages (after 5 retries)
+
+## 🔒 Security
+
+- **JWT Authentication** - Auth0-issued tokens validated at API Gateway level (not in application code)
+- **Role-Based Authorization** - Admin role via custom JWT claim (`https://mystore.com/roles`)
+- **IAM Per-Function Isolation** - 6 separate least-privilege roles (catalog can't touch cart, payment can't read products)
+- **CORS Lockdown** - Restricted to production CloudFront domain + localhost (not `*`)
+- **HTTPS Only** - All API traffic encrypted via API Gateway
+- **Payment Security** - HMAC-SHA256 signature verification for Razorpay callbacks, amount mismatch rejection
+- **Idempotent Orders** - Duplicate requests return existing order (prevents double-charge)
+- **Status Machine Enforcement** - Customer endpoint only allows valid state transitions
+- **Ownership Checks** - Users can only view/cancel/return their own orders (403 for others)
+- **Input Validation** - Schema-based validation (type, pattern, length, nested) on all user inputs
+- **Rate Limiting** - Per-route throttling: payment 5 req/s, orders 10 req/s, catalog 100 req/s
+- **Data Protection** - DynamoDB encryption at rest, point-in-time recovery (35 days)
+- **Email Safety** - Transactional emails only sent to verified addresses
+- **Secrets Isolation** - Razorpay keys only injected into payment Lambda, Auth0 M2M only into user Lambda
+
+## 🚀 Deployment
+
+### Production Deployment Checklist
+
+- [x] Per-function IAM roles with least-privilege policies
+- [x] CORS restricted to production domain
+- [x] API Gateway per-route throttling configured
+- [x] DynamoDB point-in-time recovery enabled
+- [x] SQS dead-letter queue configured
+- [x] Structured logging enabled across all services
+- [x] API access logging enabled
+- [x] Input validation on all user-facing endpoints
+- [x] CI/CD pipeline running tests on every push
+- [ ] Configure custom domain for API Gateway (optional)
+- [ ] Enable CloudFront custom domain with SSL certificate (optional)
+- [ ] Set up WAF rules for API protection (optional)
+- [ ] Enable Lambda provisioned concurrency for catalog + payment (optional)
 
 ## 📋 Prerequisites
 
@@ -59,8 +259,8 @@ A full-stack serverless e-commerce platform built with React, AWS Lambda, Dynamo
 ### 1. Clone the repository
 
 ```bash
-git clone <repository-url>
-cd <repository-name>
+git clone https://github.com/guruprasadreddyk/MyStore.git
+cd MyStore
 ```
 
 ### 2. Configure environment variables
@@ -80,9 +280,18 @@ razorpay_key_secret     = "your-razorpay-key-secret"
 smtp_user               = "yourstore@gmail.com"          # optional
 smtp_password           = "xxxx xxxx xxxx xxxx"          # Gmail App Password
 smtp_from               = "MyStore <yourstore@gmail.com>"
+frontend_domain         = ""                             # set after first deploy
 ```
 
-### 3. Deploy infrastructure
+### 3. Build Lambda packages
+
+```powershell
+.\scripts\build_lambdas.ps1
+```
+
+This packages each service with `utils.py` + `validation.py` into deployment zips.
+
+### 4. Deploy infrastructure
 
 ```bash
 cd infrastructure
@@ -96,17 +305,26 @@ Note the outputs:
 - `cloudfront_url` - Your frontend CDN URL
 - `s3_bucket_name` - Frontend hosting bucket
 
-### 4. Seed products
+### 5. Set CORS domain
 
-```bash
-cd ../scripts
-python seed_products.py
+After first deploy, add your CloudFront domain to `terraform.tfvars`:
+
+```hcl
+frontend_domain = "d1234abcd.cloudfront.net"
 ```
 
-### 5. Build and deploy frontend
+Then run `terraform apply` again to lock down CORS.
+
+### 6. Seed products
 
 ```bash
-cd ../frontend
+python scripts/seed_products.py
+```
+
+### 7. Build and deploy frontend
+
+```bash
+cd frontend
 npm install
 npm run build
 
@@ -115,7 +333,7 @@ cd ../scripts
 ./deploy_frontend.ps1
 ```
 
-### 6. Configure Auth0
+### 8. Configure Auth0
 
 1. Create an Auth0 Application (Single Page Application)
 2. Set **Allowed Callback URLs**: `http://localhost:3000, https://your-cloudfront-url`
@@ -133,159 +351,49 @@ cd ../scripts
    ```
 7. Update `frontend/src/index.js` with your Auth0 domain and client ID
 
-### 7. Access the application
+### 9. Access the application
 
 - **Production**: `https://your-cloudfront-url`
 - **Local Development**: `npm start` (from frontend directory)
 
-## 📁 Project Structure
-
-```
-.
-├── frontend/                 # React frontend application
-│   ├── src/
-│   │   ├── components/      # React components (with component-scoped CSS)
-│   │   ├── hooks/           # Custom React hooks
-│   │   └── services/        # API service layer
-│   └── public/              # Static assets
-├── services/                # Lambda function handlers
-│   ├── catalog_service.py   # Product catalog, search & reviews
-│   ├── order_service.py     # Order management & returns
-│   ├── payment_service.py   # Payment processing (Razorpay)
-│   ├── user_service.py      # User profile, cart & wishlist
-│   ├── admin_service.py     # Admin operations & analytics
-│   ├── order_processor.py   # SQS order fulfillment
-│   ├── utils.py             # Shared utilities (Gmail SMTP, SNS, order status, table names)
-│   └── validation.py        # Input validation (no external dependencies)
-├── infrastructure/          # Terraform IaC
-│   ├── main.tf             # Provider configuration
-│   ├── lambda.tf           # Lambda functions
-│   ├── api.tf              # API Gateway routes
-│   ├── api_versioning.tf   # Versioned API routes (v1)
-│   ├── dynamodb.tf         # Database tables
-│   ├── messaging.tf        # SQS & SNS
-│   ├── frontend.tf         # S3 & CloudFront
-│   └── iam.tf              # IAM roles & policies
-├── scripts/                # Deployment & utility scripts
-│   ├── build_lambdas.ps1   # Package Lambda functions (no dependencies)
-│   ├── deploy_frontend.ps1 # Deploy frontend to S3
-│   └── seed_products.py    # Seed initial product data
-├── tests/                  # Test suites
-└── docs/                   # Documentation
-```
-
-## 🔑 Key Endpoints
-
-### Public Endpoints (No Auth Required)
-- `GET /products` - List products with pagination
-- `GET /products/{id}` - Get product details
-- `GET /products/{id}/variants` - Get product variants
-- `GET /products/{id}/reviews` - Get product reviews
-- `GET /search` - Search products with filters
-- `GET /recommendations` - Get product recommendations
-
-### Protected Endpoints (Auth Required)
-- `GET /cart` - Get cart contents
-- `POST /cart/add` - Add item to cart
-- `DELETE /cart/remove/{id}` - Remove item from cart
-- `POST /order` - Create order
-- `GET /order` - Get order history
-- `POST /payment` - Process payment
-- `GET /wishlist` - Get wishlist
-- `POST /wishlist/add` - Add to wishlist
-- `POST /products/{id}/reviews` - Submit product review (verified purchase only)
-- `POST /return` - Create return request
-- `GET /return/{id}` - Get return request details
-
-### Admin Endpoints (Admin Role Required)
-- `GET /admin/dashboard` - Get dashboard stats with analytics
-- `GET /admin/products` - List all products
-- `PUT /admin/products/{id}` - Update product
-- `DELETE /admin/products/{id}` - Delete product
-- `GET /admin/orders` - List all orders
-- `PUT /admin/orders/{id}` - Update order status
-- `GET /admin/returns` - List all return requests
-- `PUT /admin/returns/{id}/approve` - Approve return request
-- `PUT /admin/returns/{id}/reject` - Reject return request with reason
-- `PUT /admin/returns/{id}/refund` - Process refund for approved return
-
-See [API Documentation](docs/API.md) for complete API reference.
-
-## 🧪 Testing
-
-```bash
-# Run all tests
-python run_tests.py
-
-# Run specific test file
-python -m pytest tests/test_catalog_service.py -v
-```
-
-## 📊 Monitoring
-
-- **CloudWatch Logs** - Lambda execution logs
-- **CloudWatch Metrics** - API Gateway metrics, Lambda invocations
-- **DynamoDB Metrics** - Read/write capacity, throttling
-- **X-Ray** - Distributed tracing (if enabled)
-
-## 🔒 Security
-
-- **JWT Authentication** - Auth0-issued tokens with audience validation
-- **HTTPS Only** - All API traffic encrypted via API Gateway
-- **CORS** - Configured for frontend domain only
-- **IAM Least Privilege** - Lambda functions have minimal required permissions
-- **Input Validation** - All user inputs validated before processing
-- **SQL Injection Protection** - DynamoDB NoSQL (no SQL injection risk)
-- **Secrets Management** - Sensitive credentials stored in Terraform variables
-
-## 🚀 Deployment
-
-### Production Deployment Checklist
-
-- [ ] Update Auth0 callback URLs with production domain
-- [ ] Configure custom domain for API Gateway
-- [ ] Enable CloudFront custom domain with SSL certificate
-- [ ] Set up CloudWatch alarms for critical metrics
-- [ ] Enable DynamoDB point-in-time recovery (already enabled)
-- [ ] Configure backup retention policies
-- [ ] Set up monitoring dashboards
-- [ ] Test payment flow with real Razorpay credentials
-- [ ] Configure Gmail App Password and verify SMTP sends
-- [ ] Review and adjust Lambda memory/timeout settings
-- [ ] Enable API Gateway access logging
-- [ ] Set up WAF rules for API protection
-
 ## 📖 Documentation
 
-- [API Reference](docs/API.md) - Complete API documentation
-- [Architecture](docs/ARCHITECTURE.md) - System design and data flow
-- [Database Schema](docs/DATABASE.md) - DynamoDB table structures
-- [Setup Guide](docs/SETUP.md) - Detailed setup instructions
-- [Deployment Guide](docs/DEPLOYMENT.md) - Production deployment
-- [Security](docs/SECURITY.md) - Security best practices
-- [Troubleshooting](docs/TROUBLESHOOTING.md) - Common issues and fixes
+Detailed documentation is available locally in the `docs/` directory:
+
+- **API.md** - Complete API documentation with examples
+- **ARCHITECTURE.md** - System design, component details, and data flow
+- **DATABASE.md** - DynamoDB table structures and GSIs
+- **FEATURES.md** - Detailed feature documentation with business logic
+- **SETUP.md** - Detailed setup instructions
+- **DEPLOYMENT.md** - Production deployment
+- **SECURITY.md** - Security practices and threat model
+- **MONITORING.md** - Observability and debugging
+- **PERFORMANCE.md** - Performance considerations
+- **INTEGRATIONS.md** - Third-party service details
+- **TESTING.md** - Test strategy and coverage
+- **TROUBLESHOOTING.md** - Common issues and fixes
 
 ## 🔮 Future Work
 
 ### Observability
-- **CloudWatch integration** — Enable API Gateway access logging and Lambda execution logs to `/aws/apigateway/` log groups. Add CloudWatch alarms for 4xx/5xx error rates and Lambda throttles.
-- **X-Ray tracing** — Distributed tracing across Lambda functions to identify latency bottlenecks.
-- **Custom metrics dashboard** — CloudWatch dashboard for order volume, payment success rate, and inventory alerts.
+- **X-Ray tracing** — Distributed tracing across Lambda functions to identify latency bottlenecks
+- **CloudWatch Alarms** — Automated alerts for 5xx error rates, DLQ depth, and payment latency
+- **Custom metrics dashboard** — CloudWatch dashboard for order volume, payment success rate, and inventory alerts
 
 ### Security
-- **AWS WAF** — Attach a Web Application Firewall to the API Gateway stage for IP-based rate limiting, bot protection, and OWASP rule sets.
-- **DynamoDB-based rate limiting** — Per-user request counters in DynamoDB as a WAF alternative for sensitive endpoints (`/payment`, `/order`).
-- **SNS-based abuse alerts** — Publish to the existing SNS topic when a user exceeds a request threshold within a Lambda, without needing WAF or CloudWatch.
+- **AWS WAF** — Web Application Firewall for IP-based rate limiting, bot protection, and OWASP rule sets
+- **DynamoDB-based rate limiting** — Per-user request counters for sensitive endpoints (`/payment`, `/order`)
+- **Secrets Manager** — Move SMTP and Razorpay credentials to AWS Secrets Manager with runtime lookup
 
 ### Infrastructure
-- **Lambda provisioned concurrency** — Eliminate cold starts on the catalog and payment services for consistent response times.
-- **Multi-region deployment** — DynamoDB Global Tables + multi-region Lambda for disaster recovery and lower latency outside ap-southeast-1.
+- **Lambda provisioned concurrency** — Eliminate cold starts on the catalog and payment services
+- **Multi-region deployment** — DynamoDB Global Tables + multi-region Lambda for disaster recovery
 
 ### Features
-- **Order tracking page** — Real-time shipment tracking with carrier integration.
-- **Discount codes and coupons** — Promo code validation at checkout.
-- **Inventory alerts** — Notify admin via SNS when stock drops below a configurable threshold.
-- **Review moderation** — Admin endpoint to flag or remove reviews.
+- **Order tracking page** — Real-time shipment tracking with carrier integration
+- **Discount codes and coupons** — Promo code validation at checkout
+- **Inventory alerts** — Notify admin via SNS when stock drops below a configurable threshold
+- **Review moderation** — Admin endpoint to flag or remove reviews
 
 ## 🤝 Contributing
 
@@ -295,10 +403,6 @@ python -m pytest tests/test_catalog_service.py -v
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
-## 📝 License
-
-This project is licensed under the MIT License.
-
 ## 🙏 Acknowledgments
 
 - Auth0 for authentication infrastructure
@@ -307,12 +411,4 @@ This project is licensed under the MIT License.
 - Gmail SMTP for email delivery
 - Picsum Photos for placeholder images
 
-## 📧 Support
-
-For issues and questions:
-- Create an issue in the repository
-- Email: updates.mystore@gmail.com
-
 ---
-
-**Built with ❤️ using serverless architecture**

@@ -5,8 +5,11 @@ resource "aws_apigatewayv2_api" "api" {
   cors_configuration {
     allow_headers  = ["Content-Type", "Authorization"]
     allow_methods  = ["OPTIONS", "GET", "POST", "PUT", "DELETE"]
-    allow_origins  = ["*"]
-    expose_headers = ["*"]
+    allow_origins  = [
+      "https://${var.frontend_domain}",
+      "http://localhost:3000"
+    ]
+    expose_headers = ["Content-Type"]
     max_age        = 3600
   }
 }
@@ -27,6 +30,23 @@ resource "aws_apigatewayv2_stage" "default" {
   api_id      = aws_apigatewayv2_api.api.id
   name        = "$default"
   auto_deploy = true
+
+  access_log_settings {
+    destination_arn = aws_cloudwatch_log_group.api_access_logs.arn
+    format = jsonencode({
+      requestId      = "$context.requestId"
+      ip             = "$context.identity.sourceIp"
+      method         = "$context.httpMethod"
+      path           = "$context.path"
+      status         = "$context.status"
+      latency        = "$context.responseLatency"
+      user           = "$context.authorizer.claims.sub"
+      requestTime    = "$context.requestTime"
+      protocol       = "$context.protocol"
+      responseLength = "$context.responseLength"
+      errorMessage   = "$context.error.message"
+    })
+  }
 
   # Global default — applies to every route not listed below
   default_route_settings {

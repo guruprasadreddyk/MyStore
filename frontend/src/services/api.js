@@ -124,11 +124,11 @@ export const removeFromCart = async (productId, headers, variantId = null) => {
   return apiFetch(path, { method: 'DELETE', headers });
 };
 
-export const placeOrder = async (items, address, headers) =>
+export const placeOrder = async (items, address, headers, idempotencyKey = null) =>
   apiFetch('/order', {
     method: 'POST',
     headers,
-    body: { items, address },
+    body: { items, address, ...(idempotencyKey && { idempotency_key: idempotencyKey }) },
   });
 
 export const cancelOrder = async (orderId, headers) =>

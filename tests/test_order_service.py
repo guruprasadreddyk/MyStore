@@ -160,14 +160,36 @@ class TestOrderService:
         assert json.loads(response['body'])['data']['order_id'] == order_id
 
     def test_update_order_status(self):
+        """Customer can cancel their own order via PUT (created → cancelled)."""
+        create_resp = lambda_handler(create_order_event('/order', 'POST', body={
+            'items': [{'id': '1'}], 'address': VALID_ADDRESS
+        }), {})
+        order_id = json.loads(create_resp['body'])['data']['order_id']
+
+        response = lambda_handler(create_order_event(f'/order/{order_id}', 'PUT', body={'status': 'cancelled'}), {})
+        assert response['statusCode'] == 200
+        assert json.loads(response['body'])['data']['status'] == 'cancelled'
+
+    def test_update_order_status_invalid_transition(self):
+        """Customer cannot transition created → shipped (admin-only)."""
         create_resp = lambda_handler(create_order_event('/order', 'POST', body={
             'items': [{'id': '1'}], 'address': VALID_ADDRESS
         }), {})
         order_id = json.loads(create_resp['body'])['data']['order_id']
 
         response = lambda_handler(create_order_event(f'/order/{order_id}', 'PUT', body={'status': 'shipped'}), {})
-        assert response['statusCode'] == 200
-        assert json.loads(response['body'])['data']['status'] == 'shipped'
+        assert response['statusCode'] == 400
+        assert 'Cannot transition' in json.loads(response['body'])['message']
+
+    def test_update_order_status_not_owner(self):
+        """A different user cannot update someone else's order."""
+        create_resp = lambda_handler(create_order_event('/order', 'POST', body={
+            'items': [{'id': '1'}], 'address': VALID_ADDRESS
+        }), {})
+        order_id = json.loads(create_resp['body'])['data']['order_id']
+
+        response = lambda_handler(create_order_event(f'/order/{order_id}', 'PUT', body={'status': 'cancelled'}, user_id='other-user'), {})
+        assert response['statusCode'] == 403
 
     def test_cancel_order_success(self):
         create_resp = lambda_handler(create_order_event('/order', 'POST', body={
