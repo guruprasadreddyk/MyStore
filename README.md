@@ -1,8 +1,8 @@
 # MyStore E-commerce Platform
 
-A full-stack serverless e-commerce platform built with React, AWS Lambda, DynamoDB, and Auth0. Features atomic inventory management, Razorpay payment integration with signature verification, per-function IAM isolation, structured observability, and a comprehensive test suite (200 backend + 28 UI tests).
+A serverless e-commerce platform for the Indian market, built end-to-end on AWS — from infrastructure provisioning (Terraform) to a React storefront served via CloudFront. The backend runs on 6 independent Lambda microservices with DynamoDB, SQS, and SNS, each isolated with its own least-privilege IAM role. Includes Razorpay payment integration, Auth0 authentication, structured observability, and 200+ automated tests.
 
-**Live:** [https://d3hckftk4ilq7v.cloudfront.net](https://d3hckftk4ilq7v.cloudfront.net)
+**Live:** [https://d3hckftk4ilq7v.cloudfront.net](https://d3hckftk4ilq7v.cloudfront.net)  
 
 **Demo Admin Access:**
 | Email | Password |
@@ -28,6 +28,8 @@ A full-stack serverless e-commerce platform built with React, AWS Lambda, Dynamo
 - **Email Verification Reminders** - Banner and checkout warning for unverified users
 - **Recommendations Engine** - Category-aware product recommendations using DynamoDB GSI queries
 - **Error Resilience** - React error boundaries, graceful degradation, dead-letter queue for failed messages
+
+> **Note:** Product images use [Picsum Photos](https://picsum.photos) — a free placeholder image service that generates random photos. Each product gets a unique image via `https://picsum.photos/400/400?random={id}`. These are not real product photos; in production, you'd replace them with actual product imagery stored in S3.
 
 ## 🏗️ Architecture
 
@@ -125,6 +127,8 @@ A full-stack serverless e-commerce platform built with React, AWS Lambda, Dynamo
 ```
 
 ## 🔑 Key Endpoints
+
+**API:** `https://hntwmrwmsl.execute-api.ap-southeast-1.amazonaws.com`
 
 ### Public Endpoints (No Auth Required)
 - `GET /products` - List products with pagination and filters (category, price, sort)
